@@ -1,0 +1,9 @@
+# Worktrees
+.worktrees/
+
+# OS files
+.DS_Store
+
+# Editor directories
+.idea/
+.vscode/
