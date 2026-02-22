@@ -310,54 +310,82 @@ async function startSelection(batchId, settings) {
   await runSelectionLoop();
 }
 
-// Main selection loop
+// Main selection loop with error handling
 async function runSelectionLoop() {
   let noNewPhotosCount = 0;
   const MAX_NO_NEW_PHOTOS = 3; // Stop after 3 scrolls with no new photos
+  let consecutiveErrors = 0;
+  const MAX_ERRORS = 5;
 
   while (selectionState.isRunning && !selectionState.isPaused) {
-    const photos = findVisiblePhotos();
-    let newPhotosFound = false;
+    try {
+      const photos = findVisiblePhotos();
 
-    for (const photo of photos) {
-      if (!selectionState.isRunning || selectionState.isPaused) break;
-
-      // Use element reference as key (or data-id if available)
-      const photoId = photo.getAttribute('data-item-id') ||
-                      photo.getAttribute('data-id') ||
-                      photos.indexOf(photo).toString();
-
-      if (selectionState.processedElements.has(photoId)) continue;
-
-      selectionState.processedElements.add(photoId);
-      newPhotosFound = true;
-
-      if (!isPhotoSelected(photo)) {
-        await selectPhoto(photo);
-        selectionState.selectedCount++;
-        updateProgress(selectionState.selectedCount);
-        await wait(selectionState.settings.clickDelay);
+      // Check if we can find photos at all
+      if (photos.length === 0 && selectionState.selectedCount === 0) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= MAX_ERRORS) {
+          updateProgress(0, 'Error: Cannot find photos. UI may have changed.');
+          stopSelection();
+          return;
+        }
+        await wait(1000); // Wait and retry
+        continue;
       }
-    }
 
-    // Check if we've reached the end
-    const scrollInfo = getScrollInfo();
-    if (!newPhotosFound) {
-      noNewPhotosCount++;
-      if (noNewPhotosCount >= MAX_NO_NEW_PHOTOS || scrollInfo.atBottom) {
-        // No new photos found, we're done
-        break;
+      consecutiveErrors = 0; // Reset on success
+      let newPhotosFound = false;
+
+      for (const photo of photos) {
+        if (!selectionState.isRunning || selectionState.isPaused) break;
+
+        const photoId = photo.getAttribute('data-item-id') ||
+                        photo.getAttribute('data-id') ||
+                        `el-${selectionState.processedElements.size}`;
+
+        if (selectionState.processedElements.has(photoId)) continue;
+
+        selectionState.processedElements.add(photoId);
+        newPhotosFound = true;
+
+        if (!isPhotoSelected(photo)) {
+          try {
+            await selectPhoto(photo);
+            selectionState.selectedCount++;
+            updateProgress(selectionState.selectedCount);
+          } catch (e) {
+            console.warn('Failed to select photo:', e);
+            // Continue with next photo
+          }
+          await wait(selectionState.settings.clickDelay);
+        }
       }
-    } else {
-      noNewPhotosCount = 0;
-    }
 
-    // Scroll down for more photos
-    scrollDown();
-    await wait(selectionState.settings.scrollDelay);
+      const scrollInfo = getScrollInfo();
+      if (!newPhotosFound) {
+        noNewPhotosCount++;
+        if (noNewPhotosCount >= MAX_NO_NEW_PHOTOS || scrollInfo.atBottom) {
+          break;
+        }
+      } else {
+        noNewPhotosCount = 0;
+      }
+
+      scrollDown();
+      await wait(selectionState.settings.scrollDelay);
+
+    } catch (error) {
+      console.error('Selection loop error:', error);
+      consecutiveErrors++;
+      if (consecutiveErrors >= MAX_ERRORS) {
+        updateProgress(selectionState.selectedCount, 'Error: Selection failed. Try again.');
+        stopSelection();
+        return;
+      }
+      await wait(1000);
+    }
   }
 
-  // Selection complete
   if (selectionState.isRunning && !selectionState.isPaused) {
     completeSelection();
   }
@@ -441,6 +469,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   return true;
 });
+
+// Detect if user navigates away from photos search results
+let lastUrl = location.href;
+const urlObserver = new MutationObserver(() => {
+  if (location.href !== lastUrl) {
+    lastUrl = location.href;
+
+    // If selection is running and we left the search results
+    if (selectionState.isRunning && !location.href.includes('photos.google.com/search')) {
+      pauseSelection();
+      updateProgress(selectionState.selectedCount, 'Paused: Navigate back to continue');
+    }
+  }
+});
+
+urlObserver.observe(document.body, { childList: true, subtree: true });
 
 // Export for debugging and testing
 window.PhotosCleanup = {
