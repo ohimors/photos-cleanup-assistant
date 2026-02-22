@@ -6,8 +6,41 @@
 </head>
 <body>
   <div id="app">
-    <h1>Photos Cleanup</h1>
-    <p>Loading...</p>
+    <!-- Header -->
+    <header class="header">
+      <h1>Photos Cleanup</h1>
+      <button id="settings-btn" class="icon-btn" title="Settings">&#9881;</button>
+    </header>
+
+    <!-- Main view: batch list -->
+    <main id="batch-list-view">
+      <button id="new-batch-btn" class="primary-btn">+ New Batch</button>
+      <div id="batch-list"></div>
+      <p id="empty-state" class="empty-state">No batches yet. Create one to get started.</p>
+    </main>
+
+    <!-- Create batch form (hidden by default) -->
+    <section id="create-batch-view" class="hidden">
+      <h2>New Batch</h2>
+      <form id="batch-form">
+        <label>
+          Batch Name
+          <input type="text" id="batch-name" placeholder="e.g., 2021 cleanup" required>
+        </label>
+        <label>
+          Start Date
+          <input type="date" id="start-date" required>
+        </label>
+        <label>
+          End Date
+          <input type="date" id="end-date" required>
+        </label>
+        <div class="form-actions">
+          <button type="button" id="cancel-btn" class="secondary-btn">Cancel</button>
+          <button type="submit" class="primary-btn">Start Selection</button>
+        </div>
+      </form>
+    </section>
   </div>
   <script src="popup.js"></script>
 </body>
