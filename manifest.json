@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Photos Cleanup Assistant",
+  "version": "0.1.0",
+  "description": "Select Google Photos by date range for manual cleanup. Does not auto-delete.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://photos.google.com/*"],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://photos.google.com/*"],
+      "js": ["src/content.js"],
+      "css": []
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "Photos Cleanup Assistant"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
