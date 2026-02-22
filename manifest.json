@@ -5,6 +5,7 @@
   "description": "Select Google Photos by date range for manual cleanup. Does not auto-delete.",
   "permissions": ["storage"],
   "host_permissions": ["https://photos.google.com/*"],
+  "options_page": "src/options/options.html",
   "background": {
     "service_worker": "src/background.js"
   },

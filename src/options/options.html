@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Photos Cleanup Assistant - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Photos Cleanup Assistant Settings</h1>
+
+    <section class="section">
+      <h2>Selection Speed</h2>
+      <p class="description">Slower speeds are safer and less likely to trigger rate limits.</p>
+
+      <label>
+        Click Delay (ms)
+        <input type="number" id="click-delay" min="25" max="500" step="25">
+        <span class="hint">Time between selecting each photo (50-100ms recommended)</span>
+      </label>
+
+      <label>
+        Scroll Delay (ms)
+        <input type="number" id="scroll-delay" min="200" max="2000" step="100">
+        <span class="hint">Time to wait after scrolling for photos to load (300-500ms recommended)</span>
+      </label>
+    </section>
+
+    <section class="section">
+      <h2>Data Management</h2>
+
+      <button id="export-btn" class="secondary-btn">Export All Data</button>
+      <button id="clear-btn" class="danger-btn">Clear All Data</button>
+    </section>
+
+    <section class="section">
+      <h2>About</h2>
+      <p>Photos Cleanup Assistant helps you select Google Photos by date range for manual cleanup.</p>
+      <p><strong>This extension does not delete photos.</strong> You always perform the final action.</p>
+      <p>Version 0.1.0</p>
+    </section>
+
+    <div id="status" class="status hidden"></div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
