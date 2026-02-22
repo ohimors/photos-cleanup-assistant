@@ -110,6 +110,165 @@ function getScrollInfo() {
   };
 }
 
+// Progress overlay element reference
+let overlayElement = null;
+
+// Create and show the progress overlay
+function showProgressOverlay() {
+  if (overlayElement) return;
+
+  overlayElement = document.createElement('div');
+  overlayElement.id = 'photos-cleanup-overlay';
+  overlayElement.innerHTML = `
+    <div class="pca-overlay-content">
+      <div class="pca-header">
+        <span class="pca-title">Photos Cleanup Assistant</span>
+        <button class="pca-close" title="Stop">&times;</button>
+      </div>
+      <div class="pca-progress">
+        <span class="pca-count">0</span>
+        <span class="pca-label">photos selected</span>
+      </div>
+      <div class="pca-status">Starting...</div>
+      <div class="pca-actions">
+        <button class="pca-btn pca-pause">Pause</button>
+        <button class="pca-btn pca-stop">Stop</button>
+      </div>
+    </div>
+  `;
+
+  // Add styles
+  const style = document.createElement('style');
+  style.id = 'photos-cleanup-styles';
+  style.textContent = `
+    #photos-cleanup-overlay {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 999999;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .pca-overlay-content {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.15);
+      padding: 16px;
+      min-width: 240px;
+    }
+    .pca-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .pca-title {
+      font-weight: 600;
+      font-size: 14px;
+      color: #333;
+    }
+    .pca-close {
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: #666;
+      padding: 0;
+      line-height: 1;
+    }
+    .pca-close:hover { color: #333; }
+    .pca-progress {
+      text-align: center;
+      margin-bottom: 8px;
+    }
+    .pca-count {
+      font-size: 36px;
+      font-weight: 700;
+      color: #1a73e8;
+    }
+    .pca-label {
+      display: block;
+      font-size: 12px;
+      color: #666;
+    }
+    .pca-status {
+      text-align: center;
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 12px;
+    }
+    .pca-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .pca-btn {
+      flex: 1;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .pca-pause {
+      background: #f1f3f4;
+      color: #333;
+    }
+    .pca-pause:hover { background: #e8eaed; }
+    .pca-stop {
+      background: #fce8e6;
+      color: #c5221f;
+    }
+    .pca-stop:hover { background: #f8d7da; }
+    .pca-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  `;
+
+  document.head.appendChild(style);
+  document.body.appendChild(overlayElement);
+
+  // Attach event listeners
+  overlayElement.querySelector('.pca-close').addEventListener('click', stopSelection);
+  overlayElement.querySelector('.pca-pause').addEventListener('click', togglePause);
+  overlayElement.querySelector('.pca-stop').addEventListener('click', stopSelection);
+}
+
+// Update progress display
+function updateProgress(count, statusText) {
+  if (!overlayElement) return;
+
+  overlayElement.querySelector('.pca-count').textContent = count.toLocaleString();
+
+  if (statusText) {
+    overlayElement.querySelector('.pca-status').textContent = statusText;
+  } else {
+    overlayElement.querySelector('.pca-status').textContent = 'Selecting...';
+  }
+
+  // Update pause button text
+  const pauseBtn = overlayElement.querySelector('.pca-pause');
+  pauseBtn.textContent = selectionState.isPaused ? 'Resume' : 'Pause';
+}
+
+// Toggle pause/resume
+function togglePause() {
+  if (selectionState.isPaused) {
+    resumeSelection();
+  } else {
+    pauseSelection();
+  }
+}
+
+// Hide the overlay
+function hideProgressOverlay() {
+  if (overlayElement) {
+    overlayElement.remove();
+    overlayElement = null;
+  }
+  const style = document.getElementById('photos-cleanup-styles');
+  if (style) style.remove();
+}
+
 // Selection state
 let selectionState = {
   isRunning: false,
@@ -140,6 +299,9 @@ async function startSelection(batchId, settings) {
   };
 
   console.log('Starting selection for batch:', batchId);
+
+  showProgressOverlay();
+  updateProgress(0, 'Starting selection...');
 
   // Scroll to top first
   scrollToTop();
@@ -173,6 +335,7 @@ async function runSelectionLoop() {
       if (!isPhotoSelected(photo)) {
         await selectPhoto(photo);
         selectionState.selectedCount++;
+        updateProgress(selectionState.selectedCount);
         await wait(selectionState.settings.clickDelay);
       }
     }
@@ -203,6 +366,7 @@ async function runSelectionLoop() {
 // Pause selection
 function pauseSelection() {
   selectionState.isPaused = true;
+  updateProgress(selectionState.selectedCount, 'Paused');
   console.log('Selection paused at', selectionState.selectedCount, 'photos');
 }
 
@@ -210,6 +374,7 @@ function pauseSelection() {
 async function resumeSelection() {
   if (!selectionState.isRunning) return;
   selectionState.isPaused = false;
+  updateProgress(selectionState.selectedCount, 'Resuming...');
   console.log('Resuming selection...');
   await runSelectionLoop();
 }
@@ -218,6 +383,7 @@ async function resumeSelection() {
 function stopSelection() {
   selectionState.isRunning = false;
   selectionState.isPaused = false;
+  updateProgress(selectionState.selectedCount, 'Stopped');
   console.log('Selection stopped at', selectionState.selectedCount, 'photos');
 
   // Notify background script
@@ -231,6 +397,7 @@ function stopSelection() {
 // Complete selection
 function completeSelection() {
   selectionState.isRunning = false;
+  updateProgress(selectionState.selectedCount, 'Complete!');
   console.log('Selection complete:', selectionState.selectedCount, 'photos selected');
 
   // Notify background script
