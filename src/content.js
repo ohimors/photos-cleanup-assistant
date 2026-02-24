@@ -402,6 +402,178 @@
     `;
   }
 
+  // DOM Selectors - may need updating if Google changes their UI
+  const SELECTORS = {
+    // Photo grid items - Google uses various attributes
+    photoItem: '[data-latest-bg], [data-media-key], [jsaction*="click:"]',
+    // Video indicator - duration badge or play icon
+    videoIndicator: '[data-video-preview], [aria-label*="Video"], [aria-label*="video"]',
+    // Date headers in the photo grid
+    dateHeader: '[data-date], [aria-label*="20"]',
+    // Photo image element for orientation detection
+    photoImage: 'img[src*="googleusercontent"]'
+  };
+
+  // Find all visible photo elements
+  function findPhotoElements() {
+    const items = document.querySelectorAll(SELECTORS.photoItem);
+    return Array.from(items).filter(el => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+  }
+
+  // Check if element is a video
+  function isVideo(element) {
+    // Check for video indicator within the element
+    if (element.querySelector(SELECTORS.videoIndicator)) return true;
+    // Check aria-label
+    const label = element.getAttribute('aria-label') || '';
+    if (label.toLowerCase().includes('video')) return true;
+    // Check for duration text (e.g., "0:30")
+    const text = element.textContent || '';
+    if (/\d+:\d{2}/.test(text)) return true;
+    return false;
+  }
+
+  // Check if element is a RAW file (limited detection)
+  function isRaw(element) {
+    const label = element.getAttribute('aria-label') || '';
+    return /\.(dng|cr2|cr3|nef|arw|orf|rw2|raw)$/i.test(label);
+  }
+
+  // Get orientation from image dimensions
+  function getOrientation(element) {
+    const img = element.querySelector(SELECTORS.photoImage);
+    if (!img) return 'unknown';
+
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+
+    if (!width || !height) return 'unknown';
+
+    const ratio = width / height;
+    if (ratio > 1.1) return 'landscape';
+    if (ratio < 0.9) return 'portrait';
+    return 'square';
+  }
+
+  // Parse date from a date header element
+  function parseDateHeader(element) {
+    // Try data-date attribute first
+    const dataDate = element.getAttribute('data-date');
+    if (dataDate) {
+      return new Date(dataDate);
+    }
+
+    // Try aria-label (e.g., "January 15, 2024")
+    const label = element.getAttribute('aria-label') || element.textContent || '';
+    const parsed = Date.parse(label);
+    if (!isNaN(parsed)) {
+      return new Date(parsed);
+    }
+
+    return null;
+  }
+
+  // Find the date header for a photo element
+  function findDateForPhoto(photoElement) {
+    // Walk backwards through siblings and parents to find date header
+    let current = photoElement;
+    while (current) {
+      // Check previous siblings
+      let sibling = current.previousElementSibling;
+      while (sibling) {
+        const dateEl = sibling.matches(SELECTORS.dateHeader) ? sibling : sibling.querySelector(SELECTORS.dateHeader);
+        if (dateEl) {
+          return parseDateHeader(dateEl);
+        }
+        sibling = sibling.previousElementSibling;
+      }
+      // Move up to parent
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  // Check if photo matches current filters
+  function matchesFilters(element) {
+    // Check file type
+    const isVid = isVideo(element);
+    const isRawFile = isRaw(element);
+    const isPhoto = !isVid && !isRawFile;
+
+    if (isPhoto && !filters.fileType.photos) return false;
+    if (isVid && !filters.fileType.videos) return false;
+    if (isRawFile && !filters.fileType.raw) return false;
+
+    // Check date range
+    if (filters.dateRange.from || filters.dateRange.to) {
+      const photoDate = findDateForPhoto(element);
+      if (photoDate) {
+        if (filters.dateRange.from) {
+          const fromDate = new Date(filters.dateRange.from);
+          if (photoDate < fromDate) return false;
+        }
+        if (filters.dateRange.to) {
+          const toDate = new Date(filters.dateRange.to);
+          toDate.setHours(23, 59, 59, 999); // Include the entire end day
+          if (photoDate > toDate) return false;
+        }
+      }
+    }
+
+    // Check orientation (photos only)
+    if (filters.orientation !== 'any' && isPhoto) {
+      const orientation = getOrientation(element);
+      if (orientation !== 'unknown' && orientation !== filters.orientation) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // Check if element is already selected
+  function isSelected(element) {
+    // Google Photos shows selection state via aria-selected or visual class
+    if (element.getAttribute('aria-selected') === 'true') return true;
+    if (element.querySelector('[aria-checked="true"]')) return true;
+    // Check for selection checkmark
+    const checkmark = element.querySelector('svg[data-icon="check"], .check-icon');
+    if (checkmark) return true;
+    return false;
+  }
+
+  // Select a photo element (Ctrl+Click)
+  function selectPhoto(element) {
+    const clickEvent = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      ctrlKey: true,
+      metaKey: true
+    });
+    element.dispatchEvent(clickEvent);
+  }
+
+  // Scroll helpers
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }
+
+  function scrollDown() {
+    window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
+  }
+
+  function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function isAtBottom() {
+    return (window.scrollY + window.innerHeight) >= (document.documentElement.scrollHeight - 100);
+  }
+
   // Inject trigger button into Google Photos header
   function injectTriggerButton() {
     // Google Photos header contains the search bar and action buttons
