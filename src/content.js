@@ -536,25 +536,54 @@
 
   // Check if element is already selected
   function isSelected(element) {
-    // Google Photos shows selection state via aria-selected or visual class
+    // Google Photos shows selection state via various attributes
     if (element.getAttribute('aria-selected') === 'true') return true;
     if (element.querySelector('[aria-checked="true"]')) return true;
-    // Check for selection checkmark
-    const checkmark = element.querySelector('svg[data-icon="check"], .check-icon');
-    if (checkmark) return true;
+    if (element.querySelector('[role="checkbox"][aria-checked="true"]')) return true;
+    // Check for selection checkmark or selected class
+    if (element.querySelector('svg[data-icon="check"], .check-icon')) return true;
+    if (element.classList.contains('selected')) return true;
+    // Check for Google's selection indicator classes
+    if (element.querySelector('.ckGgle.checked, .jfk-checkbox-checked')) return true;
     return false;
   }
 
-  // Select a photo element (Ctrl+Click)
+  // Select a photo element by clicking its checkbox
   function selectPhoto(element) {
-    const clickEvent = new MouseEvent('click', {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-      ctrlKey: true,
-      metaKey: true
-    });
-    element.dispatchEvent(clickEvent);
+    // Google Photos shows a checkbox on hover - we need to find and click it
+    // The checkbox may be hidden until hover, so we trigger hover first
+
+    // Trigger mouseenter to reveal checkbox
+    element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+
+    // Look for checkbox elements - Google Photos uses various selectors
+    const checkboxSelectors = [
+      '[role="checkbox"]',
+      '[aria-checked]',
+      'input[type="checkbox"]',
+      '[data-selection-toggle]',
+      '.ckGgle',  // Google's checkbox class
+      '[jsaction*="select"]',
+      '[jsaction*="toggle"]'
+    ];
+
+    let checkbox = null;
+    for (const selector of checkboxSelectors) {
+      checkbox = element.querySelector(selector);
+      if (checkbox) break;
+    }
+
+    if (checkbox) {
+      // Click the checkbox directly
+      checkbox.click();
+      return true;
+    }
+
+    // Fallback: try clicking the element itself with a regular click
+    // Some UIs toggle selection on simple click
+    element.click();
+    return true;
   }
 
   // Scroll helpers
