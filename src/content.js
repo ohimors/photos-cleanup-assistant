@@ -925,16 +925,54 @@
     const finalCount = selection.count;
     selection.isRunning = false;
 
-    // Check if any photos were selected
-    if (finalCount === 0 && !selection.shouldStop) {
-      closeModal();
-      showNoMatchToast();
-      return;
+    // Show completion state in modal (don't auto-close)
+    showCompletionState(finalCount);
+  }
+
+  function showCompletionState(count) {
+    if (!state.modal) return;
+
+    const progressView = state.modal.querySelector('#gpc-progress-view');
+    if (!progressView) return;
+
+    // Update the progress view to show completion
+    const spinner = progressView.querySelector('.gpc-spinner');
+    const label = progressView.querySelector('.gpc-progress-label');
+    const countEl = progressView.querySelector('#gpc-progress-count');
+    const stopBtn = progressView.querySelector('[data-action="stop"]');
+
+    // Hide spinner, show checkmark
+    if (spinner) {
+      spinner.style.display = 'none';
     }
 
-    // Close modal and show toast
-    closeModal();
-    showToast(finalCount);
+    // Update label
+    if (label) {
+      if (count === 0) {
+        label.textContent = 'No photos matched your filters';
+        label.style.color = '#f59e0b';
+      } else {
+        label.textContent = 'Selection complete!';
+        label.style.color = '#22c55e';
+      }
+    }
+
+    // Update count display
+    if (countEl) {
+      countEl.textContent = count.toLocaleString();
+      if (count > 0) {
+        countEl.style.color = '#22c55e';
+      }
+    }
+
+    // Change stop button to done button
+    if (stopBtn) {
+      stopBtn.textContent = 'Done';
+      stopBtn.classList.remove('stop');
+      stopBtn.style.background = '#22c55e';
+      stopBtn.dataset.action = 'done';
+      stopBtn.onclick = closeModal;
+    }
   }
 
   async function runSelectionLoop() {
