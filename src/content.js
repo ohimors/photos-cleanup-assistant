@@ -39,6 +39,27 @@
     isModalOpen: false
   };
 
+  // Filter state
+  const filters = {
+    fileType: {
+      photos: true,
+      videos: true,
+      raw: false
+    },
+    dateRange: {
+      from: null,
+      to: null
+    },
+    orientation: 'any'
+  };
+
+  // Selection state
+  const selection = {
+    isRunning: false,
+    count: 0,
+    shouldStop: false
+  };
+
   function getStyles() {
     return `
       * {
@@ -460,15 +481,178 @@
     }
   }
 
-  // Placeholder functions - will be implemented in Task 5
   function openModal() {
-    console.log('Opening modal...');
+    if (state.modal) return;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'gpc-backdrop';
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) closeModal();
+    });
+
+    const modal = document.createElement('div');
+    modal.className = 'gpc-modal';
+    modal.innerHTML = getModalHTML();
+
+    backdrop.appendChild(modal);
+    state.container.appendChild(backdrop);
+    state.modal = backdrop;
     state.isModalOpen = true;
+
+    // Bind event listeners
+    bindModalEvents(modal);
+    updateActionButton();
   }
 
   function closeModal() {
-    console.log('Closing modal...');
+    if (!state.modal) return;
+
+    // If selection is running, stop it
+    if (selection.isRunning) {
+      selection.shouldStop = true;
+    }
+
+    state.modal.remove();
+    state.modal = null;
     state.isModalOpen = false;
+  }
+
+  function getModalHTML() {
+    return `
+      <div class="gpc-modal-header">
+        <div>
+          <h2 class="gpc-modal-title">Google Photos Cleaner</h2>
+          <p class="gpc-modal-subtitle">Quickly select photos and videos by type, date range, and orientation.</p>
+        </div>
+        <button class="gpc-close-btn" data-action="close">&times;</button>
+      </div>
+      <div class="gpc-modal-body" id="gpc-filter-view">
+        <!-- File Type -->
+        <div class="gpc-section">
+          <p class="gpc-section-title">File type</p>
+          <p class="gpc-section-hint">Choose what to include</p>
+          <div class="gpc-toggles">
+            <button class="gpc-toggle ${filters.fileType.photos ? 'active' : ''}" data-filter="photos">
+              <span class="gpc-toggle-check"></span>
+              Photos
+            </button>
+            <button class="gpc-toggle ${filters.fileType.videos ? 'active' : ''}" data-filter="videos">
+              <span class="gpc-toggle-check"></span>
+              Videos
+            </button>
+            <button class="gpc-toggle ${filters.fileType.raw ? 'active' : ''}" data-filter="raw">
+              <span class="gpc-toggle-check"></span>
+              RAW
+            </button>
+          </div>
+        </div>
+
+        <!-- Date Range -->
+        <div class="gpc-section">
+          <p class="gpc-section-title">Date range</p>
+          <p class="gpc-section-hint">Limit selection to a specific time period</p>
+          <div class="gpc-date-row">
+            <label class="gpc-date-label">From</label>
+            <input type="date" class="gpc-date-input" data-filter="date-from" value="${filters.dateRange.from || ''}">
+          </div>
+          <div class="gpc-date-row">
+            <label class="gpc-date-label">To</label>
+            <input type="date" class="gpc-date-input" data-filter="date-to" value="${filters.dateRange.to || ''}">
+          </div>
+        </div>
+
+        <!-- Orientation -->
+        <div class="gpc-section">
+          <p class="gpc-section-title">Orientation</p>
+          <p class="gpc-section-hint">Target landscape, portrait, or square photos</p>
+          <select class="gpc-select" data-filter="orientation">
+            <option value="any" ${filters.orientation === 'any' ? 'selected' : ''}>Any orientation</option>
+            <option value="landscape" ${filters.orientation === 'landscape' ? 'selected' : ''}>Landscape</option>
+            <option value="portrait" ${filters.orientation === 'portrait' ? 'selected' : ''}>Portrait</option>
+            <option value="square" ${filters.orientation === 'square' ? 'selected' : ''}>Square</option>
+          </select>
+        </div>
+
+        <button class="gpc-action-btn" data-action="start" disabled>Start Selection</button>
+        <p class="gpc-validation-hint" id="gpc-validation-hint"></p>
+      </div>
+      <div class="gpc-modal-body gpc-progress" id="gpc-progress-view" style="display: none;">
+        <div class="gpc-spinner"></div>
+        <p class="gpc-progress-label">Selecting...</p>
+        <p class="gpc-progress-count" id="gpc-progress-count">0</p>
+        <button class="gpc-action-btn stop" data-action="stop">Stop Selection</button>
+      </div>
+    `;
+  }
+
+  function bindModalEvents(modal) {
+    // Close button
+    modal.querySelector('[data-action="close"]').addEventListener('click', closeModal);
+
+    // File type toggles
+    modal.querySelectorAll('[data-filter="photos"], [data-filter="videos"], [data-filter="raw"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const filterKey = btn.dataset.filter;
+        filters.fileType[filterKey] = !filters.fileType[filterKey];
+        btn.classList.toggle('active', filters.fileType[filterKey]);
+        updateActionButton();
+      });
+    });
+
+    // Date inputs
+    modal.querySelector('[data-filter="date-from"]').addEventListener('change', (e) => {
+      filters.dateRange.from = e.target.value || null;
+      updateActionButton();
+    });
+
+    modal.querySelector('[data-filter="date-to"]').addEventListener('change', (e) => {
+      filters.dateRange.to = e.target.value || null;
+      updateActionButton();
+    });
+
+    // Orientation select
+    modal.querySelector('[data-filter="orientation"]').addEventListener('change', (e) => {
+      filters.orientation = e.target.value;
+      updateActionButton();
+    });
+
+    // Start button
+    modal.querySelector('[data-action="start"]').addEventListener('click', startSelection);
+
+    // Stop button
+    modal.querySelector('[data-action="stop"]').addEventListener('click', () => {
+      selection.shouldStop = true;
+    });
+  }
+
+  function updateActionButton() {
+    if (!state.modal) return;
+
+    const btn = state.modal.querySelector('[data-action="start"]');
+    const hint = state.modal.querySelector('#gpc-validation-hint');
+
+    // Check if filters would select everything
+    const noDateFilter = !filters.dateRange.from && !filters.dateRange.to;
+    const noOrientationFilter = filters.orientation === 'any';
+
+    // Require at least one meaningful filter
+    const hasFilter = !noDateFilter || !noOrientationFilter || !filters.fileType.photos || !filters.fileType.videos || filters.fileType.raw;
+
+    if (!hasFilter) {
+      btn.disabled = true;
+      hint.textContent = 'Set at least one filter to start selection';
+    } else if (!filters.fileType.photos && !filters.fileType.videos && !filters.fileType.raw) {
+      btn.disabled = true;
+      hint.textContent = 'Select at least one file type';
+    } else {
+      btn.disabled = false;
+      hint.textContent = '';
+    }
+  }
+
+  // Placeholder - will be implemented in Task 7
+  function startSelection() {
+    console.log('Starting selection with filters:', filters);
   }
 
   // Initialize when DOM is ready
