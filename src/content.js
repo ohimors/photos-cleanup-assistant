@@ -822,9 +822,112 @@
     }
   }
 
-  // Placeholder - will be implemented in Task 7
-  function startSelection() {
-    console.log('Starting selection with filters:', filters);
+  async function startSelection() {
+    if (selection.isRunning) return;
+
+    // Switch to progress view
+    selection.isRunning = true;
+    selection.count = 0;
+    selection.shouldStop = false;
+
+    const filterView = state.modal.querySelector('#gpc-filter-view');
+    const progressView = state.modal.querySelector('#gpc-progress-view');
+    filterView.style.display = 'none';
+    progressView.style.display = 'block';
+
+    updateProgressCount(0);
+
+    // Scroll to top first
+    scrollToTop();
+    await wait(500);
+
+    // Run selection loop
+    await runSelectionLoop();
+
+    // Complete
+    const finalCount = selection.count;
+    selection.isRunning = false;
+
+    // Close modal and show toast
+    closeModal();
+    showToast(finalCount);
+  }
+
+  async function runSelectionLoop() {
+    const processedElements = new Set();
+    let noNewPhotosCount = 0;
+    const MAX_NO_NEW = 3;
+    const CLICK_DELAY = 75;
+    const SCROLL_DELAY = 400;
+
+    while (!selection.shouldStop) {
+      const photos = findPhotoElements();
+      let foundNew = false;
+
+      for (const photo of photos) {
+        if (selection.shouldStop) break;
+
+        // Create a unique key for this element
+        const key = photo.getAttribute('data-media-key') ||
+                    photo.getAttribute('data-latest-bg') ||
+                    photo.getBoundingClientRect().top + '-' + photo.getBoundingClientRect().left;
+
+        if (processedElements.has(key)) continue;
+        processedElements.add(key);
+        foundNew = true;
+
+        // Check if matches filters
+        if (!matchesFilters(photo)) continue;
+
+        // Check if already selected
+        if (isSelected(photo)) continue;
+
+        // Select the photo
+        selectPhoto(photo);
+        selection.count++;
+        updateProgressCount(selection.count);
+
+        await wait(CLICK_DELAY);
+      }
+
+      // Check if we should stop
+      if (!foundNew) {
+        noNewPhotosCount++;
+        if (noNewPhotosCount >= MAX_NO_NEW || isAtBottom()) {
+          break;
+        }
+      } else {
+        noNewPhotosCount = 0;
+      }
+
+      // Scroll down
+      scrollDown();
+      await wait(SCROLL_DELAY);
+    }
+  }
+
+  function updateProgressCount(count) {
+    if (!state.modal) return;
+    const countEl = state.modal.querySelector('#gpc-progress-count');
+    if (countEl) {
+      countEl.textContent = count.toLocaleString();
+    }
+  }
+
+  function showToast(count) {
+    const toast = document.createElement('div');
+    toast.className = 'gpc-toast';
+    toast.innerHTML = `
+      <span class="gpc-toast-icon">&#10003;</span>
+      <span>${count.toLocaleString()} photos selected</span>
+    `;
+    state.container.appendChild(toast);
+
+    // Auto-dismiss after 4 seconds
+    setTimeout(() => {
+      toast.classList.add('hiding');
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
   }
 
   // Initialize when DOM is ready
