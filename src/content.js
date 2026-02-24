@@ -874,6 +874,13 @@
     const finalCount = selection.count;
     selection.isRunning = false;
 
+    // Check if any photos were selected
+    if (finalCount === 0 && !selection.shouldStop) {
+      closeModal();
+      showNoMatchToast();
+      return;
+    }
+
     // Close modal and show toast
     closeModal();
     showToast(finalCount);
@@ -882,53 +889,76 @@
   async function runSelectionLoop() {
     const processedElements = new Set();
     let noNewPhotosCount = 0;
+    let errorCount = 0;
     const MAX_NO_NEW = 3;
+    const MAX_ERRORS = 5;
     const CLICK_DELAY = 75;
     const SCROLL_DELAY = 400;
 
     while (!selection.shouldStop) {
-      const photos = findPhotoElements();
-      let foundNew = false;
+      try {
+        const photos = findPhotoElements();
 
-      for (const photo of photos) {
-        if (selection.shouldStop) break;
+        // Check if we can find any photos
+        if (photos.length === 0 && processedElements.size === 0) {
+          errorCount++;
+          if (errorCount >= MAX_ERRORS) {
+            showErrorToast('Unable to find photos. Google may have updated their UI.');
+            break;
+          }
+          await wait(1000);
+          continue;
+        }
 
-        // Create a unique key for this element
-        const key = photo.getAttribute('data-media-key') ||
-                    photo.getAttribute('data-latest-bg') ||
-                    photo.getBoundingClientRect().top + '-' + photo.getBoundingClientRect().left;
+        errorCount = 0;
+        let foundNew = false;
 
-        if (processedElements.has(key)) continue;
-        processedElements.add(key);
-        foundNew = true;
+        for (const photo of photos) {
+          if (selection.shouldStop) break;
 
-        // Check if matches filters
-        if (!matchesFilters(photo)) continue;
+          const key = photo.getAttribute('data-media-key') ||
+                      photo.getAttribute('data-latest-bg') ||
+                      photo.getBoundingClientRect().top + '-' + photo.getBoundingClientRect().left;
 
-        // Check if already selected
-        if (isSelected(photo)) continue;
+          if (processedElements.has(key)) continue;
+          processedElements.add(key);
+          foundNew = true;
 
-        // Select the photo
-        selectPhoto(photo);
-        selection.count++;
-        updateProgressCount(selection.count);
+          if (!matchesFilters(photo)) continue;
+          if (isSelected(photo)) continue;
 
-        await wait(CLICK_DELAY);
-      }
+          try {
+            selectPhoto(photo);
+            selection.count++;
+            updateProgressCount(selection.count);
+          } catch (e) {
+            console.warn('Failed to select photo:', e);
+          }
 
-      // Check if we should stop
-      if (!foundNew) {
-        noNewPhotosCount++;
-        if (noNewPhotosCount >= MAX_NO_NEW || isAtBottom()) {
+          await wait(CLICK_DELAY);
+        }
+
+        if (!foundNew) {
+          noNewPhotosCount++;
+          if (noNewPhotosCount >= MAX_NO_NEW || isAtBottom()) {
+            break;
+          }
+        } else {
+          noNewPhotosCount = 0;
+        }
+
+        scrollDown();
+        await wait(SCROLL_DELAY);
+
+      } catch (error) {
+        console.error('Selection loop error:', error);
+        errorCount++;
+        if (errorCount >= MAX_ERRORS) {
+          showErrorToast('Selection failed. Please try again.');
           break;
         }
-      } else {
-        noNewPhotosCount = 0;
+        await wait(1000);
       }
-
-      // Scroll down
-      scrollDown();
-      await wait(SCROLL_DELAY);
     }
   }
 
@@ -950,6 +980,38 @@
     state.container.appendChild(toast);
 
     // Auto-dismiss after 4 seconds
+    setTimeout(() => {
+      toast.classList.add('hiding');
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
+  function showErrorToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'gpc-toast';
+    toast.style.background = '#7f1d1d';
+    toast.innerHTML = `
+      <span class="gpc-toast-icon" style="color: #fca5a5;">!</span>
+      <span>${message}</span>
+    `;
+    state.container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.classList.add('hiding');
+      setTimeout(() => toast.remove(), 300);
+    }, 5000);
+  }
+
+  function showNoMatchToast() {
+    const toast = document.createElement('div');
+    toast.className = 'gpc-toast';
+    toast.style.background = '#78350f';
+    toast.innerHTML = `
+      <span class="gpc-toast-icon" style="color: #fcd34d;">!</span>
+      <span>No photos matched your filters</span>
+    `;
+    state.container.appendChild(toast);
+
     setTimeout(() => {
       toast.classList.add('hiding');
       setTimeout(() => toast.remove(), 300);
