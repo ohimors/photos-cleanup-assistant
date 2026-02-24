@@ -557,6 +557,7 @@
     element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
     element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
 
+    // Small delay to let checkbox appear
     // Look for checkbox elements - Google Photos uses various selectors
     const checkboxSelectors = [
       '[role="checkbox"]',
@@ -580,10 +581,9 @@
       return true;
     }
 
-    // Fallback: try clicking the element itself with a regular click
-    // Some UIs toggle selection on simple click
-    element.click();
-    return true;
+    // No checkbox found - do NOT click the element (would navigate away)
+    console.warn('Google Photos Cleaner: Could not find checkbox for photo element');
+    return false;
   }
 
   // Scroll helpers
@@ -1017,9 +1017,11 @@
           if (isSelected(photo)) continue;
 
           try {
-            selectPhoto(photo);
-            selection.count++;
-            updateProgressCount(selection.count);
+            const selected = selectPhoto(photo);
+            if (selected) {
+              selection.count++;
+              updateProgressCount(selection.count);
+            }
           } catch (e) {
             console.warn('Failed to select photo:', e);
           }
