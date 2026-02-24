@@ -574,51 +574,69 @@
     return (window.scrollY + window.innerHeight) >= (document.documentElement.scrollHeight - 100);
   }
 
-  // Inject trigger button into Google Photos header
+  // Inject trigger button into Google Photos sidebar navigation
   function injectTriggerButton() {
-    // Google Photos header contains the search bar and action buttons
-    // Look for the header element - this selector may need updating if Google changes their UI
-    const headerSelectors = [
-      'header',
-      '[role="banner"]',
-      'c-wiz > div > div > header'
-    ];
-
-    let header = null;
-    for (const selector of headerSelectors) {
-      header = document.querySelector(selector);
-      if (header) break;
-    }
-
-    if (!header) {
-      console.warn('Google Photos Cleaner: Could not find header element');
-      // Retry after delay
-      setTimeout(injectTriggerButton, 1000);
-      return;
-    }
-
     // Check if button already exists
     if (document.getElementById('gpc-trigger-button')) {
       return;
     }
 
+    // Google Photos uses a sidebar navigation with role="navigation"
+    const sidebar = document.querySelector('[role="navigation"]') ||
+                    document.querySelector('.RSjvib');
+
+    if (!sidebar) {
+      console.warn('Google Photos Cleaner: Could not find sidebar navigation');
+      // Retry after delay
+      setTimeout(injectTriggerButton, 1000);
+      return;
+    }
+
+    // Find the top section of the sidebar (contains logo and account)
+    const topSection = sidebar.querySelector('.poGHk') ||
+                       sidebar.querySelector('.MrWjeb') ||
+                       sidebar.firstElementChild;
+
+    if (!topSection) {
+      console.warn('Google Photos Cleaner: Could not find sidebar top section');
+      setTimeout(injectTriggerButton, 1000);
+      return;
+    }
+
+    // Create a container for our button that matches sidebar styling
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = `
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    `;
+
     // Create trigger button
     const button = document.createElement('button');
     button.id = 'gpc-trigger-button';
     button.textContent = 'Cleaner';
-    button.title = 'Google Photos Cleaner';
+    button.title = 'Google Photos Cleaner - Select photos by filters';
     button.style.cssText = `
       background: #3b82f6;
       color: white;
       border: none;
-      border-radius: 18px;
-      padding: 8px 16px;
+      border-radius: 8px;
+      padding: 10px 16px;
       font-size: 14px;
       font-weight: 500;
       cursor: pointer;
-      margin-left: 8px;
+      width: 100%;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    `;
+    button.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3 5h18v2H3V5zm0 6h18v2H3v-2zm0 6h18v2H3v-2z"/>
+      </svg>
+      Cleaner
     `;
     button.addEventListener('mouseenter', () => {
       button.style.background = '#2563eb';
@@ -628,20 +646,24 @@
     });
     button.addEventListener('click', toggleModal);
 
-    // Find a good insertion point in the header (right side)
-    // Look for the profile/account button area
-    const rightArea = header.querySelector('[data-ogpc]') ||
-                      header.querySelector('a[href*="accounts.google.com"]')?.parentElement ||
-                      header.lastElementChild;
+    buttonContainer.appendChild(button);
 
-    if (rightArea && rightArea.parentElement) {
-      rightArea.parentElement.insertBefore(button, rightArea);
+    // Insert after the top section
+    const parent = topSection.parentElement;
+    if (!parent) {
+      console.warn('Google Photos Cleaner: Could not find parent element');
+      setTimeout(injectTriggerButton, 1000);
+      return;
+    }
+
+    if (topSection.nextSibling) {
+      parent.insertBefore(buttonContainer, topSection.nextSibling);
     } else {
-      header.appendChild(button);
+      parent.appendChild(buttonContainer);
     }
 
     state.triggerButton = button;
-    console.log('Google Photos Cleaner: Trigger button injected');
+    console.log('Google Photos Cleaner: Trigger button injected into sidebar');
   }
 
   // Toggle modal open/closed
