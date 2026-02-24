@@ -653,8 +653,20 @@
     }
   }
 
-  function openModal() {
+  async function openModal() {
     if (state.modal) return;
+
+    // Load saved preferences
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_PREFERENCES' });
+      if (response && response.lastUsedFilters) {
+        Object.assign(filters.fileType, response.lastUsedFilters.fileType);
+        Object.assign(filters.dateRange, response.lastUsedFilters.dateRange);
+        filters.orientation = response.lastUsedFilters.orientation;
+      }
+    } catch (e) {
+      console.warn('Could not load preferences:', e);
+    }
 
     const backdrop = document.createElement('div');
     backdrop.className = 'gpc-backdrop';
@@ -824,6 +836,20 @@
 
   async function startSelection() {
     if (selection.isRunning) return;
+
+    // Save current filters for next time
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'SAVE_FILTERS',
+        filters: {
+          fileType: { ...filters.fileType },
+          dateRange: { ...filters.dateRange },
+          orientation: filters.orientation
+        }
+      });
+    } catch (e) {
+      console.warn('Could not save filters:', e);
+    }
 
     // Switch to progress view
     selection.isRunning = true;
