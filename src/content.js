@@ -572,6 +572,16 @@
     return new Date(dateString);
   }
 
+  // Format date as "Mon YYYY" for display (e.g., "Feb 2024")
+  function formatDateForDisplay(date) {
+    if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+      return 'Unknown';
+    }
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${months[date.getMonth()]} ${date.getFullYear()}`;
+  }
+
   // Check if photo container matches current filters
   function matchesFilters(container) {
     // Get metadata from checkbox aria-label
