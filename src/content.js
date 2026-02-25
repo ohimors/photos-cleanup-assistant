@@ -1108,13 +1108,22 @@
 
     // Update label
     if (label) {
-      if (count === 0) {
+      if (selection.shouldStop && count === 0) {
+        label.textContent = 'Selection stopped';
+        label.style.color = '#9ca3af';
+      } else if (count === 0) {
         label.textContent = 'No photos matched your filters';
         label.style.color = '#f59e0b';
       } else {
         label.textContent = 'Selection complete!';
         label.style.color = '#22c55e';
       }
+    }
+
+    // Clear status text
+    const status = progressView.querySelector('#gpc-progress-status');
+    if (status) {
+      status.textContent = '';
     }
 
     // Update count display
