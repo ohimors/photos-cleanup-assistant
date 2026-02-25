@@ -824,6 +824,10 @@
     selection.isRunning = false;
     selection.count = 0;
     selection.shouldStop = false;
+    selection.phase = 'idle';
+    selection.currentDateViewing = null;
+    selection.startTime = null;
+    selection.isPaused = false;
 
     // Reset filters to defaults before loading preferences
     filters.fileType.photos = true;
