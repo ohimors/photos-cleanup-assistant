@@ -403,6 +403,68 @@
         text-align: center;
         margin-top: 8px;
       }
+
+      /* Progress status text */
+      .gpc-progress-status {
+        color: #6b7280;
+        font-size: 13px;
+        margin: 8px 0 0 0;
+      }
+
+      /* Timeout prompt */
+      .gpc-timeout-view {
+        text-align: center;
+        padding: 30px 20px;
+      }
+
+      .gpc-timeout-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #f59e0b;
+        margin: 0 0 16px 0;
+      }
+
+      .gpc-timeout-info {
+        color: #9ca3af;
+        font-size: 14px;
+        margin: 0 0 8px 0;
+      }
+
+      .gpc-timeout-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .gpc-timeout-btn {
+        width: 100%;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-size: 15px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        transition: background 0.2s;
+      }
+
+      .gpc-timeout-btn.continue {
+        background: #3b82f6;
+        color: white;
+      }
+
+      .gpc-timeout-btn.continue:hover {
+        background: #2563eb;
+      }
+
+      .gpc-timeout-btn.stop {
+        background: #4b5563;
+        color: #d1d5db;
+      }
+
+      .gpc-timeout-btn.stop:hover {
+        background: #6b7280;
+      }
     `;
   }
 
