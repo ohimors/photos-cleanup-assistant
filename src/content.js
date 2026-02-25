@@ -1143,10 +1143,21 @@
     const MAX_ERRORS = 5;
     const CLICK_DELAY = 75;
     const SCROLL_DELAY = 400;
+    const TIMEOUT_MS = 180000; // 3 minutes
 
     while (!selection.shouldStop) {
+      // Check for timeout (3 minutes)
+      if (Date.now() - selection.startTime > TIMEOUT_MS) {
+        showTimeoutPrompt();
+        // Wait for user decision
+        while (selection.isPaused && !selection.shouldStop) {
+          await wait(100);
+        }
+        if (selection.shouldStop) break;
+      }
+
       try {
-        const photos = findPhotoElements();
+        const photos = findPhotoContainers();
 
         // Check if we can find any photos
         if (photos.length === 0 && processedElements.size === 0) {
@@ -1161,11 +1172,13 @@
 
         errorCount = 0;
         let foundNew = false;
+        let oldestDateInBatch = null;
+        let passedTargetRange = false;
 
         for (const container of photos) {
           if (selection.shouldStop) break;
 
-          // Generate unique key from checkbox aria-label or position
+          // Generate unique key
           const checkbox = getCheckbox(container);
           const photoEl = container.querySelector('[data-latest-bg]');
           const key = checkbox?.getAttribute('aria-label') ||
@@ -1176,6 +1189,31 @@
           processedElements.add(key);
           foundNew = true;
 
+          // Track oldest date seen
+          const metadata = getPhotoMetadata(container);
+          if (metadata && metadata.date) {
+            if (!oldestDateInBatch || compareDatesOnly(metadata.date, oldestDateInBatch) < 0) {
+              oldestDateInBatch = metadata.date;
+            }
+          }
+
+          // Check if we've scrolled past the target range
+          if (isBeforeTargetRange(container)) {
+            passedTargetRange = true;
+            console.log('Google Photos Cleaner: Passed target date range, stopping');
+            break;
+          }
+
+          // Check if photo is within target range (for phase tracking)
+          if (isWithinTargetRange(container)) {
+            if (selection.phase === 'scanning') {
+              selection.phase = 'selecting';
+              updateProgressLabel('Selecting...');
+              updateProgressStatus('');
+            }
+          }
+
+          // Try to select if it matches all filters
           if (!matchesFilters(container)) continue;
           if (isSelected(container)) continue;
 
@@ -1192,9 +1230,29 @@
           await wait(CLICK_DELAY);
         }
 
+        // Update current viewing date for UI
+        if (oldestDateInBatch) {
+          selection.currentDateViewing = oldestDateInBatch;
+          if (selection.phase === 'scanning') {
+            updateProgressStatus(`Viewing: ${formatDateForDisplay(oldestDateInBatch)}`);
+          }
+        }
+
+        // Stop if we've passed the target range
+        if (passedTargetRange) {
+          break;
+        }
+
+        // Only use noNewPhotos stop condition if no "from" date is set
         if (!foundNew) {
           noNewPhotosCount++;
-          if (noNewPhotosCount >= MAX_NO_NEW || isAtBottom()) {
+          // If we have a "from" date, keep scrolling unless at bottom
+          if (!filters.dateRange.from) {
+            if (noNewPhotosCount >= MAX_NO_NEW || isAtBottom()) {
+              break;
+            }
+          } else if (isAtBottom()) {
+            // With "from" date, only stop at actual bottom
             break;
           }
         } else {
@@ -1214,6 +1272,8 @@
         await wait(1000);
       }
     }
+
+    selection.phase = 'complete';
   }
 
   function updateProgressCount(count) {
