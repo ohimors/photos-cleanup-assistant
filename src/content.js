@@ -707,7 +707,20 @@
   async function openModal() {
     if (state.modal) return;
 
-    // Load saved preferences
+    // Reset selection state for fresh start
+    selection.isRunning = false;
+    selection.count = 0;
+    selection.shouldStop = false;
+
+    // Reset filters to defaults before loading preferences
+    filters.fileType.photos = true;
+    filters.fileType.videos = true;
+    filters.fileType.raw = false;
+    filters.dateRange.from = null;
+    filters.dateRange.to = null;
+    filters.orientation = 'any';
+
+    // Load saved preferences (optional - comment out to always start fresh)
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_PREFERENCES' });
       if (response && response.lastUsedFilters) {
