@@ -908,9 +908,19 @@
       </div>
       <div class="gpc-modal-body gpc-progress" id="gpc-progress-view" style="display: none;">
         <div class="gpc-spinner"></div>
-        <p class="gpc-progress-label">Selecting...</p>
+        <p class="gpc-progress-label" id="gpc-progress-label">Scanning...</p>
         <p class="gpc-progress-count" id="gpc-progress-count">0</p>
-        <button class="gpc-action-btn stop" data-action="stop">Stop Selection</button>
+        <p class="gpc-progress-status" id="gpc-progress-status"></p>
+        <button class="gpc-action-btn stop" data-action="stop">Stop</button>
+      </div>
+      <div class="gpc-modal-body gpc-timeout-view" id="gpc-timeout-view" style="display: none;">
+        <p class="gpc-timeout-title">Scanning taking a while...</p>
+        <p class="gpc-timeout-info" id="gpc-timeout-date">Currently viewing: Unknown</p>
+        <p class="gpc-timeout-info" id="gpc-timeout-count">Photos selected: 0</p>
+        <div class="gpc-timeout-buttons">
+          <button class="gpc-timeout-btn continue" data-action="continue">Continue Scanning</button>
+          <button class="gpc-timeout-btn stop" data-action="timeout-stop">Stop</button>
+        </div>
       </div>
     `;
   }
