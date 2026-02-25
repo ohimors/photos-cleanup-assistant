@@ -1060,6 +1060,10 @@
     selection.isRunning = true;
     selection.count = 0;
     selection.shouldStop = false;
+    selection.phase = 'scanning';
+    selection.currentDateViewing = null;
+    selection.startTime = Date.now();
+    selection.isPaused = false;
 
     const filterView = state.modal.querySelector('#gpc-filter-view');
     const progressView = state.modal.querySelector('#gpc-progress-view');
@@ -1067,6 +1071,8 @@
     progressView.style.display = 'block';
 
     updateProgressCount(0);
+    updateProgressLabel('Scanning...');
+    updateProgressStatus('');
 
     // Scroll to top first
     scrollToTop();
