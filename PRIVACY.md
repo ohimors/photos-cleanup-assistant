@@ -1,22 +1,23 @@
 # Privacy Policy
 
-Photos Cleanup Assistant is designed with privacy as a core principle.
+Google Photos Cleaner is designed with privacy as a core principle.
 
 ## Data Collection
 
-**What we access:**
+**What we access on Google Photos:**
 - Photo thumbnails visible on screen (to identify selection targets)
-- Date information displayed in the Google Photos UI
+- Date information displayed in the timeline
+- Visual indicators for file type (photo/video)
 
 **What we store locally:**
-- Batch metadata (name, date range, count)
-- User preferences (selection speed settings)
+- Your last used filter settings (file type, date range, orientation)
+- Selection speed preferences
 
 **What we NEVER collect:**
-- Full-resolution photos
-- Photo content or image data
+- Full-resolution photos or image content
 - Google account credentials
-- Browsing history outside photos.google.com
+- Browsing history
+- Any data sent to external servers
 
 ## Data Storage
 
@@ -24,15 +25,11 @@ All data is stored locally in your browser using Chrome's `chrome.storage.local`
 
 ## Data Deletion
 
-You can delete all extension data at any time:
-1. Right-click the extension icon → "Options"
-2. Click "Clear All Data"
-
-Or uninstall the extension, which removes all stored data.
+Uninstall the extension to remove all stored data, or clear Chrome's extension storage.
 
 ## Permissions
 
-- `storage`: Store batch history and settings locally
+- `storage`: Store filter preferences locally
 - `host_permissions` for `photos.google.com`: Interact with Google Photos UI
 
 ## Contact

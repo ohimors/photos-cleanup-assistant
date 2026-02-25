@@ -1,76 +1,49 @@
 // src/background.js
-// Service worker for Photos Cleanup Assistant
+// Service worker for Google Photos Cleaner
 
-importScripts('storage.js');
+const DEFAULT_PREFERENCES = {
+  lastUsedFilters: {
+    fileType: { photos: true, videos: true, raw: false },
+    dateRange: { from: null, to: null },
+    orientation: 'any'
+  },
+  scrollDelay: 400,
+  clickDelay: 75
+};
 
-console.log('Photos Cleanup Assistant: Service worker loaded');
-
-// Message handler for popup and content script communication
+// Message handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  handleMessage(message, sender).then(sendResponse);
-  return true; // Keep channel open for async response
+  handleMessage(message).then(sendResponse);
+  return true;
 });
 
-async function handleMessage(message, sender) {
+async function handleMessage(message) {
   switch (message.type) {
-    case 'GET_BATCHES':
-      return { batches: await getBatches() };
+    case 'GET_PREFERENCES':
+      return await getPreferences();
 
-    case 'GET_SETTINGS':
-      return { settings: await getSettings() };
-
-    case 'SAVE_BATCH':
-      return { batch: await saveBatch(message.batch) };
-
-    case 'CREATE_BATCH':
-      const batch = createBatch(message.name, message.startDate, message.endDate);
-      return { batch: await saveBatch(batch) };
-
-    case 'DELETE_BATCH':
-      await deleteBatch(message.batchId);
+    case 'SAVE_PREFERENCES':
+      await savePreferences(message.preferences);
       return { success: true };
 
-    case 'SAVE_SETTINGS':
-      await saveSettings(message.settings);
-      return { success: true };
-
-    case 'CLEAR_ALL_DATA':
-      await clearAllData();
-      return { success: true };
-
-    case 'EXPORT_DATA':
-      return { data: await exportData() };
-
-    case 'SELECTION_COMPLETE':
-      const completedBatch = await updateBatchStatus(
-        message.batchId,
-        'completed',
-        message.photosSelected
-      );
-      return { batch: completedBatch };
-
-    case 'SELECTION_STOPPED':
-      const stoppedBatch = await updateBatchStatus(
-        message.batchId,
-        'stopped',
-        message.photosSelected
-      );
-      return { batch: stoppedBatch };
-
-    case 'START_SELECTION_ON_TAB':
-      // Send message to content script on active tab
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab && tab.url?.includes('photos.google.com')) {
-        const settings = await getSettings();
-        chrome.tabs.sendMessage(tab.id, {
-          type: 'START_SELECTION',
-          batchId: message.batchId,
-          settings
-        });
-      }
+    case 'SAVE_FILTERS':
+      const prefs = await getPreferences();
+      prefs.lastUsedFilters = message.filters;
+      await savePreferences(prefs);
       return { success: true };
 
     default:
       return { error: 'Unknown message type' };
   }
 }
+
+async function getPreferences() {
+  const result = await chrome.storage.local.get('preferences');
+  return result.preferences || DEFAULT_PREFERENCES;
+}
+
+async function savePreferences(preferences) {
+  await chrome.storage.local.set({ preferences });
+}
+
+console.log('Google Photos Cleaner: Service worker loaded');

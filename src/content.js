@@ -1,503 +1,1149 @@
 // src/content.js
 // Content script for photos.google.com
 
-console.log('Photos Cleanup Assistant: Content script loaded');
+(function() {
+  'use strict';
 
-// DOM Selectors - may need updating if Google Photos changes
-const SELECTORS = {
-  // The main photo grid container
-  photoGrid: '[data-photo-grid]',
-  // Individual photo tiles (fallback patterns)
-  photoTile: '[data-item-id], [data-id]',
-  // The selection checkbox that appears on hover/selection
-  photoContainer: '[role="listitem"], [data-tile-id]'
-};
-
-// Find all visible photo elements in the viewport
-function findVisiblePhotos() {
-  // Try multiple selector patterns since Google Photos DOM varies
-  const selectors = [
-    '[data-item-id]',
-    '[data-id]',
-    '[role="listitem"]'
-  ];
-
-  let photos = [];
-
-  for (const selector of selectors) {
-    const elements = document.querySelectorAll(selector);
-    if (elements.length > 0) {
-      photos = Array.from(elements).filter(isInViewport);
-      if (photos.length > 0) {
-        console.log(`Found ${photos.length} photos using selector: ${selector}`);
-        break;
-      }
-    }
-  }
-
-  if (photos.length === 0) {
-    console.warn('Photos Cleanup: Could not find photo elements. DOM structure may have changed.');
-  }
-
-  return photos;
-}
-
-// Check if element is in the viewport
-function isInViewport(el) {
-  const rect = el.getBoundingClientRect();
-  return (
-    rect.top < window.innerHeight &&
-    rect.bottom > 0 &&
-    rect.left < window.innerWidth &&
-    rect.right > 0
-  );
-}
-
-// Check if a photo is already selected
-function isPhotoSelected(photoEl) {
-  // Google Photos shows a checkmark icon when selected
-  // Look for aria-selected, checked state, or visual indicators
-  if (photoEl.getAttribute('aria-selected') === 'true') return true;
-  if (photoEl.classList.contains('selected')) return true;
-
-  // Check for checkmark icon inside
-  const checkmark = photoEl.querySelector('[aria-checked="true"], .check-icon, svg[data-icon="check"]');
-  if (checkmark) return true;
-
-  return false;
-}
-
-// Select a single photo by clicking it
-async function selectPhoto(photoEl) {
-  // In Google Photos, Shift+Click or Ctrl/Cmd+Click adds to selection
-  // We simulate this by dispatching a click with modifier key
-  const clickEvent = new MouseEvent('click', {
-    bubbles: true,
-    cancelable: true,
-    view: window,
-    ctrlKey: true,  // Ctrl+click to add to selection
-    metaKey: true   // Cmd+click for Mac
-  });
-
-  photoEl.dispatchEvent(clickEvent);
-}
-
-// Scroll down by one viewport height
-function scrollDown() {
-  window.scrollBy({
-    top: window.innerHeight * 0.8,
-    behavior: 'smooth'
-  });
-}
-
-// Scroll to top of page
-function scrollToTop() {
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-// Wait for a specified duration
-function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Get scroll position info for end detection
-function getScrollInfo() {
-  return {
-    scrollY: window.scrollY,
-    scrollHeight: document.documentElement.scrollHeight,
-    viewportHeight: window.innerHeight,
-    atBottom: (window.scrollY + window.innerHeight) >= (document.documentElement.scrollHeight - 100)
-  };
-}
-
-// Progress overlay element reference
-let overlayElement = null;
-
-// Create and show the progress overlay
-function showProgressOverlay() {
-  if (overlayElement) return;
-
-  overlayElement = document.createElement('div');
-  overlayElement.id = 'photos-cleanup-overlay';
-  overlayElement.innerHTML = `
-    <div class="pca-overlay-content">
-      <div class="pca-header">
-        <span class="pca-title">Photos Cleanup Assistant</span>
-        <button class="pca-close" title="Stop">&times;</button>
-      </div>
-      <div class="pca-progress">
-        <span class="pca-count">0</span>
-        <span class="pca-label">photos selected</span>
-      </div>
-      <div class="pca-status">Starting...</div>
-      <div class="pca-actions">
-        <button class="pca-btn pca-pause">Pause</button>
-        <button class="pca-btn pca-stop">Stop</button>
-      </div>
-    </div>
-  `;
-
-  // Add styles
-  const style = document.createElement('style');
-  style.id = 'photos-cleanup-styles';
-  style.textContent = `
-    #photos-cleanup-overlay {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      z-index: 999999;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    .pca-overlay-content {
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.15);
-      padding: 16px;
-      min-width: 240px;
-    }
-    .pca-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 12px;
-    }
-    .pca-title {
-      font-weight: 600;
-      font-size: 14px;
-      color: #333;
-    }
-    .pca-close {
-      background: none;
-      border: none;
-      font-size: 20px;
-      cursor: pointer;
-      color: #666;
-      padding: 0;
-      line-height: 1;
-    }
-    .pca-close:hover { color: #333; }
-    .pca-progress {
-      text-align: center;
-      margin-bottom: 8px;
-    }
-    .pca-count {
-      font-size: 36px;
-      font-weight: 700;
-      color: #1a73e8;
-    }
-    .pca-label {
-      display: block;
-      font-size: 12px;
-      color: #666;
-    }
-    .pca-status {
-      text-align: center;
-      font-size: 13px;
-      color: #666;
-      margin-bottom: 12px;
-    }
-    .pca-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .pca-btn {
-      flex: 1;
-      padding: 8px 12px;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      cursor: pointer;
-    }
-    .pca-pause {
-      background: #f1f3f4;
-      color: #333;
-    }
-    .pca-pause:hover { background: #e8eaed; }
-    .pca-stop {
-      background: #fce8e6;
-      color: #c5221f;
-    }
-    .pca-stop:hover { background: #f8d7da; }
-    .pca-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-  `;
-
-  document.head.appendChild(style);
-  document.body.appendChild(overlayElement);
-
-  // Attach event listeners
-  overlayElement.querySelector('.pca-close').addEventListener('click', stopSelection);
-  overlayElement.querySelector('.pca-pause').addEventListener('click', togglePause);
-  overlayElement.querySelector('.pca-stop').addEventListener('click', stopSelection);
-}
-
-// Update progress display
-function updateProgress(count, statusText) {
-  if (!overlayElement) return;
-
-  overlayElement.querySelector('.pca-count').textContent = count.toLocaleString();
-
-  if (statusText) {
-    overlayElement.querySelector('.pca-status').textContent = statusText;
-  } else {
-    overlayElement.querySelector('.pca-status').textContent = 'Selecting...';
-  }
-
-  // Update pause button text
-  const pauseBtn = overlayElement.querySelector('.pca-pause');
-  pauseBtn.textContent = selectionState.isPaused ? 'Resume' : 'Pause';
-}
-
-// Toggle pause/resume
-function togglePause() {
-  if (selectionState.isPaused) {
-    resumeSelection();
-  } else {
-    pauseSelection();
-  }
-}
-
-// Hide the overlay
-function hideProgressOverlay() {
-  if (overlayElement) {
-    overlayElement.remove();
-    overlayElement = null;
-  }
-  const style = document.getElementById('photos-cleanup-styles');
-  if (style) style.remove();
-}
-
-// Selection state
-let selectionState = {
-  isRunning: false,
-  isPaused: false,
-  batchId: null,
-  selectedCount: 0,
-  processedElements: new Set(), // Track elements we've already processed
-  settings: {
-    scrollDelay: 400,
-    clickDelay: 75
-  }
-};
-
-// Start the selection process
-async function startSelection(batchId, settings) {
-  if (selectionState.isRunning) {
-    console.log('Selection already in progress');
+  // Prevent multiple injections
+  if (document.getElementById('gpc-shadow-host')) {
     return;
   }
 
-  selectionState = {
-    isRunning: true,
-    isPaused: false,
-    batchId,
-    selectedCount: 0,
-    processedElements: new Set(),
-    settings: settings || selectionState.settings
+  // Create Shadow DOM host
+  const shadowHost = document.createElement('div');
+  shadowHost.id = 'gpc-shadow-host';
+  shadowHost.style.cssText = 'position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 999999;';
+  document.body.appendChild(shadowHost);
+
+  // Attach shadow root
+  const shadowRoot = shadowHost.attachShadow({ mode: 'closed' });
+
+  // Inject styles
+  const style = document.createElement('style');
+  style.textContent = getStyles();
+  shadowRoot.appendChild(style);
+
+  // Create container for UI elements
+  const container = document.createElement('div');
+  container.id = 'gpc-container';
+  shadowRoot.appendChild(container);
+
+  console.log('Google Photos Cleaner: Shadow DOM initialized');
+
+  // Store references
+  const state = {
+    shadowRoot,
+    container,
+    triggerButton: null,
+    modal: null,
+    isModalOpen: false
   };
 
-  console.log('Starting selection for batch:', batchId);
+  // Filter state
+  const filters = {
+    fileType: {
+      photos: true,
+      videos: true,
+      raw: false
+    },
+    dateRange: {
+      from: null,
+      to: null
+    },
+    orientation: 'any'
+  };
 
-  showProgressOverlay();
-  updateProgress(0, 'Starting selection...');
+  // Selection state
+  const selection = {
+    isRunning: false,
+    count: 0,
+    shouldStop: false
+  };
 
-  // Scroll to top first
-  scrollToTop();
-  await wait(500);
-
-  await runSelectionLoop();
-}
-
-// Main selection loop with error handling
-async function runSelectionLoop() {
-  let noNewPhotosCount = 0;
-  const MAX_NO_NEW_PHOTOS = 3; // Stop after 3 scrolls with no new photos
-  let consecutiveErrors = 0;
-  const MAX_ERRORS = 5;
-
-  while (selectionState.isRunning && !selectionState.isPaused) {
-    try {
-      const photos = findVisiblePhotos();
-
-      // Check if we can find photos at all
-      if (photos.length === 0 && selectionState.selectedCount === 0) {
-        consecutiveErrors++;
-        if (consecutiveErrors >= MAX_ERRORS) {
-          updateProgress(0, 'Error: Cannot find photos. UI may have changed.');
-          stopSelection();
-          return;
-        }
-        await wait(1000); // Wait and retry
-        continue;
+  function getStyles() {
+    return `
+      * {
+        box-sizing: border-box;
       }
 
-      consecutiveErrors = 0; // Reset on success
-      let newPhotosFound = false;
+      #gpc-container {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+      }
 
-      for (const photo of photos) {
-        if (!selectionState.isRunning || selectionState.isPaused) break;
+      /* Modal backdrop */
+      .gpc-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 999999;
+      }
 
-        const photoId = photo.getAttribute('data-item-id') ||
-                        photo.getAttribute('data-id') ||
-                        `el-${selectionState.processedElements.size}`;
+      /* Modal container */
+      .gpc-modal {
+        background: #1f2937;
+        border-radius: 12px;
+        width: 400px;
+        max-width: 90vw;
+        max-height: 90vh;
+        overflow-y: auto;
+        color: #f3f4f6;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      }
 
-        if (selectionState.processedElements.has(photoId)) continue;
+      /* Modal header */
+      .gpc-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 20px 20px 0 20px;
+      }
 
-        selectionState.processedElements.add(photoId);
-        newPhotosFound = true;
+      .gpc-modal-title {
+        font-size: 20px;
+        font-weight: 600;
+        margin: 0 0 4px 0;
+        color: #f9fafb;
+      }
 
-        if (!isPhotoSelected(photo)) {
+      .gpc-modal-subtitle {
+        font-size: 13px;
+        color: #9ca3af;
+        margin: 0;
+      }
+
+      .gpc-close-btn {
+        background: none;
+        border: none;
+        color: #9ca3af;
+        font-size: 24px;
+        cursor: pointer;
+        padding: 0;
+        line-height: 1;
+        transition: color 0.2s;
+      }
+
+      .gpc-close-btn:hover {
+        color: #f3f4f6;
+      }
+
+      /* Modal body */
+      .gpc-modal-body {
+        padding: 20px;
+      }
+
+      /* Section */
+      .gpc-section {
+        background: #374151;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+
+      .gpc-section:last-child {
+        margin-bottom: 0;
+      }
+
+      .gpc-section-title {
+        font-size: 12px;
+        color: #9ca3af;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin: 0 0 12px 0;
+      }
+
+      .gpc-section-hint {
+        font-size: 12px;
+        color: #6b7280;
+        margin: 0 0 12px 0;
+        float: right;
+        margin-top: -24px;
+      }
+
+      /* Toggle buttons */
+      .gpc-toggles {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .gpc-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: #4b5563;
+        border: 2px solid transparent;
+        border-radius: 8px;
+        padding: 10px 16px;
+        color: #d1d5db;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 14px;
+      }
+
+      .gpc-toggle:hover {
+        background: #6b7280;
+      }
+
+      .gpc-toggle.active {
+        background: #3b82f6;
+        border-color: #3b82f6;
+        color: white;
+      }
+
+      .gpc-toggle-check {
+        width: 18px;
+        height: 18px;
+        border: 2px solid currentColor;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .gpc-toggle.active .gpc-toggle-check {
+        background: white;
+        border-color: white;
+      }
+
+      .gpc-toggle.active .gpc-toggle-check::after {
+        content: '\\2713';
+        color: #3b82f6;
+        font-size: 12px;
+        font-weight: bold;
+      }
+
+      /* Date inputs */
+      .gpc-date-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .gpc-date-row:last-child {
+        margin-bottom: 0;
+      }
+
+      .gpc-date-label {
+        width: 40px;
+        color: #9ca3af;
+        font-size: 14px;
+      }
+
+      .gpc-date-input {
+        flex: 1;
+        background: #4b5563;
+        border: 1px solid #6b7280;
+        border-radius: 6px;
+        padding: 10px 12px;
+        color: #f3f4f6;
+        font-size: 14px;
+        font-family: inherit;
+      }
+
+      .gpc-date-input:focus {
+        outline: none;
+        border-color: #3b82f6;
+      }
+
+      /* Dropdown */
+      .gpc-select {
+        width: 100%;
+        background: #4b5563;
+        border: 1px solid #6b7280;
+        border-radius: 6px;
+        padding: 10px 12px;
+        color: #f3f4f6;
+        font-size: 14px;
+        font-family: inherit;
+        cursor: pointer;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239ca3af' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 12px center;
+      }
+
+      .gpc-select:focus {
+        outline: none;
+        border-color: #3b82f6;
+      }
+
+      /* Action button */
+      .gpc-action-btn {
+        width: 100%;
+        background: #22c55e;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 14px 20px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s;
+        margin-top: 20px;
+      }
+
+      .gpc-action-btn:hover:not(:disabled) {
+        background: #16a34a;
+      }
+
+      .gpc-action-btn:disabled {
+        background: #4b5563;
+        color: #9ca3af;
+        cursor: not-allowed;
+      }
+
+      .gpc-action-btn.stop {
+        background: #ef4444;
+      }
+
+      .gpc-action-btn.stop:hover {
+        background: #dc2626;
+      }
+
+      /* Progress state */
+      .gpc-progress {
+        text-align: center;
+        padding: 40px 20px;
+      }
+
+      .gpc-spinner {
+        width: 48px;
+        height: 48px;
+        border: 4px solid #374151;
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        animation: gpc-spin 1s linear infinite;
+        margin: 0 auto 16px;
+      }
+
+      @keyframes gpc-spin {
+        to { transform: rotate(360deg); }
+      }
+
+      .gpc-progress-label {
+        color: #9ca3af;
+        font-size: 14px;
+        margin: 0 0 8px 0;
+      }
+
+      .gpc-progress-count {
+        font-size: 36px;
+        font-weight: 700;
+        color: #3b82f6;
+        margin: 0;
+      }
+
+      /* Toast */
+      .gpc-toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1f2937;
+        color: #f3f4f6;
+        padding: 12px 24px;
+        border-radius: 8px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        z-index: 9999999;
+        animation: gpc-toast-in 0.3s ease;
+      }
+
+      .gpc-toast.hiding {
+        animation: gpc-toast-out 0.3s ease forwards;
+      }
+
+      @keyframes gpc-toast-in {
+        from {
+          opacity: 0;
+          transform: translateX(-50%) translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(-50%) translateY(0);
+        }
+      }
+
+      @keyframes gpc-toast-out {
+        from {
+          opacity: 1;
+          transform: translateX(-50%) translateY(0);
+        }
+        to {
+          opacity: 0;
+          transform: translateX(-50%) translateY(20px);
+        }
+      }
+
+      .gpc-toast-icon {
+        color: #22c55e;
+        font-size: 18px;
+      }
+
+      /* Validation hint */
+      .gpc-validation-hint {
+        color: #f59e0b;
+        font-size: 12px;
+        text-align: center;
+        margin-top: 8px;
+      }
+    `;
+  }
+
+  // DOM Selectors - may need updating if Google changes their UI
+  const SELECTORS = {
+    // Photo container - the div that contains both photo and checkbox
+    photoContainer: 'div.rtIMgb',
+    // Photo checkbox with aria-label containing all metadata
+    photoCheckbox: '[role="checkbox"].ckGgle',
+    // Photo image element
+    photoImage: '[data-latest-bg]'
+  };
+
+  // Parse the checkbox aria-label to extract metadata
+  // Format: "Photo - Portrait - Feb 25, 2026, 8:46:07 AM"
+  // Format: "Video - Landscape - Feb 23, 2026, 11:44:02 PM"
+  function parseCheckboxLabel(ariaLabel) {
+    if (!ariaLabel) return null;
+
+    const result = {
+      type: 'photo',      // 'photo' | 'video'
+      orientation: 'unknown', // 'portrait' | 'landscape' | 'square' | 'unknown'
+      date: null          // Date object
+    };
+
+    // Extract type (Photo or Video)
+    if (ariaLabel.toLowerCase().startsWith('video')) {
+      result.type = 'video';
+    } else if (ariaLabel.toLowerCase().startsWith('photo')) {
+      result.type = 'photo';
+    }
+
+    // Extract orientation
+    const lowerLabel = ariaLabel.toLowerCase();
+    if (lowerLabel.includes('portrait')) {
+      result.orientation = 'portrait';
+    } else if (lowerLabel.includes('landscape')) {
+      result.orientation = 'landscape';
+    } else if (lowerLabel.includes('square')) {
+      result.orientation = 'square';
+    }
+
+    // Extract date - format is "Feb 25, 2026, 8:46:07 AM" at the end
+    // Try to match date pattern after the orientation
+    const dateMatch = ariaLabel.match(/(\w{3}\s+\d{1,2},\s+\d{4})/);
+    if (dateMatch) {
+      const parsed = Date.parse(dateMatch[1]);
+      if (!isNaN(parsed)) {
+        result.date = new Date(parsed);
+      }
+    }
+
+    return result;
+  }
+
+  // Find all visible photo containers with their checkboxes
+  function findPhotoContainers() {
+    const containers = document.querySelectorAll(SELECTORS.photoContainer);
+    return Array.from(containers).filter(container => {
+      // Must have a checkbox
+      const checkbox = container.querySelector(SELECTORS.photoCheckbox);
+      if (!checkbox) return false;
+
+      // Must be visible
+      const rect = container.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+  }
+
+  // Get checkbox from a photo container
+  function getCheckbox(container) {
+    return container.querySelector(SELECTORS.photoCheckbox);
+  }
+
+  // Get photo metadata from checkbox aria-label
+  function getPhotoMetadata(container) {
+    const checkbox = getCheckbox(container);
+    if (!checkbox) return null;
+
+    const ariaLabel = checkbox.getAttribute('aria-label');
+    return parseCheckboxLabel(ariaLabel);
+  }
+
+  // Legacy function for compatibility - find photo elements
+  function findPhotoElements() {
+    // Return photo containers instead
+    return findPhotoContainers();
+  }
+
+  // Compare two dates by year, month, day only (ignoring time/timezone)
+  function compareDatesOnly(date1, date2) {
+    const y1 = date1.getFullYear(), m1 = date1.getMonth(), d1 = date1.getDate();
+    const y2 = date2.getFullYear(), m2 = date2.getMonth(), d2 = date2.getDate();
+    if (y1 !== y2) return y1 - y2;
+    if (m1 !== m2) return m1 - m2;
+    return d1 - d2;
+  }
+
+  // Parse ISO date string (YYYY-MM-DD) to local date, avoiding timezone issues
+  function parseISODateString(dateString) {
+    const match = dateString.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
+    }
+    return new Date(dateString);
+  }
+
+  // Check if photo container matches current filters
+  function matchesFilters(container) {
+    // Get metadata from checkbox aria-label
+    const metadata = getPhotoMetadata(container);
+
+    if (!metadata) {
+      console.log('Google Photos Cleaner: Could not get metadata for container, skipping');
+      return false;
+    }
+
+    // Check file type
+    const isPhoto = metadata.type === 'photo';
+    const isVid = metadata.type === 'video';
+
+    if (isPhoto && !filters.fileType.photos) return false;
+    if (isVid && !filters.fileType.videos) return false;
+    // Note: RAW detection not available from aria-label, assume photos include RAW for now
+
+    // Check date range
+    if (filters.dateRange.from || filters.dateRange.to) {
+      const photoDate = metadata.date;
+
+      // If we can't determine the date and a date filter is set, skip this photo
+      if (!photoDate) {
+        console.log('Google Photos Cleaner: Could not determine date for photo, skipping');
+        return false;
+      }
+
+      console.log('Google Photos Cleaner: Photo date:', photoDate.toDateString(),
+        'Filter from:', filters.dateRange.from, 'to:', filters.dateRange.to);
+
+      if (filters.dateRange.from) {
+        const fromDate = parseISODateString(filters.dateRange.from);
+        if (compareDatesOnly(photoDate, fromDate) < 0) {
+          console.log('Google Photos Cleaner: Photo before date range, skipping');
+          return false;
+        }
+      }
+      if (filters.dateRange.to) {
+        const toDate = parseISODateString(filters.dateRange.to);
+        if (compareDatesOnly(photoDate, toDate) > 0) {
+          console.log('Google Photos Cleaner: Photo after date range, skipping');
+          return false;
+        }
+      }
+    }
+
+    // Check orientation (photos only)
+    if (filters.orientation !== 'any' && isPhoto) {
+      const orientation = metadata.orientation;
+      if (orientation !== 'unknown' && orientation !== filters.orientation) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // Check if photo container is already selected
+  function isSelected(container) {
+    const checkbox = getCheckbox(container);
+    if (!checkbox) return false;
+
+    return checkbox.getAttribute('aria-checked') === 'true';
+  }
+
+  // Select a photo by clicking its checkbox
+  function selectPhoto(container) {
+    // Trigger mouseenter to ensure checkbox is interactive
+    container.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    container.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+
+    const checkbox = getCheckbox(container);
+
+    if (checkbox) {
+      // Click the checkbox directly
+      checkbox.click();
+      console.log('Google Photos Cleaner: Clicked checkbox for photo');
+      return true;
+    }
+
+    // No checkbox found
+    console.warn('Google Photos Cleaner: Could not find checkbox for photo container');
+    return false;
+  }
+
+  // Scroll helpers
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }
+
+  function scrollDown() {
+    window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
+  }
+
+  function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function isAtBottom() {
+    return (window.scrollY + window.innerHeight) >= (document.documentElement.scrollHeight - 100);
+  }
+
+  // Inject trigger button into Google Photos sidebar navigation
+  function injectTriggerButton() {
+    // Check if button already exists
+    if (document.getElementById('gpc-trigger-button')) {
+      return;
+    }
+
+    // Google Photos uses a sidebar navigation with role="navigation"
+    const sidebar = document.querySelector('[role="navigation"]') ||
+                    document.querySelector('.RSjvib');
+
+    if (!sidebar) {
+      console.warn('Google Photos Cleaner: Could not find sidebar navigation');
+      // Retry after delay
+      setTimeout(injectTriggerButton, 1000);
+      return;
+    }
+
+    // Find the top section of the sidebar (contains logo and account)
+    const topSection = sidebar.querySelector('.poGHk') ||
+                       sidebar.querySelector('.MrWjeb') ||
+                       sidebar.firstElementChild;
+
+    if (!topSection) {
+      console.warn('Google Photos Cleaner: Could not find sidebar top section');
+      setTimeout(injectTriggerButton, 1000);
+      return;
+    }
+
+    // Create a container for our button that matches sidebar styling
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = `
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    `;
+
+    // Create trigger button
+    const button = document.createElement('button');
+    button.id = 'gpc-trigger-button';
+    button.textContent = 'Cleaner';
+    button.title = 'Google Photos Cleaner - Select photos by filters';
+    button.style.cssText = `
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      width: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    `;
+    button.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3 5h18v2H3V5zm0 6h18v2H3v-2zm0 6h18v2H3v-2z"/>
+      </svg>
+      Cleaner
+    `;
+    button.addEventListener('mouseenter', () => {
+      button.style.background = '#2563eb';
+    });
+    button.addEventListener('mouseleave', () => {
+      button.style.background = '#3b82f6';
+    });
+    button.addEventListener('click', toggleModal);
+
+    buttonContainer.appendChild(button);
+
+    // Insert after the top section
+    const parent = topSection.parentElement;
+    if (!parent) {
+      console.warn('Google Photos Cleaner: Could not find parent element');
+      setTimeout(injectTriggerButton, 1000);
+      return;
+    }
+
+    if (topSection.nextSibling) {
+      parent.insertBefore(buttonContainer, topSection.nextSibling);
+    } else {
+      parent.appendChild(buttonContainer);
+    }
+
+    state.triggerButton = button;
+    console.log('Google Photos Cleaner: Trigger button injected into sidebar');
+  }
+
+  // Toggle modal open/closed
+  function toggleModal() {
+    if (state.isModalOpen) {
+      closeModal();
+    } else {
+      openModal();
+    }
+  }
+
+  async function openModal() {
+    if (state.modal) return;
+
+    // Reset selection state for fresh start
+    selection.isRunning = false;
+    selection.count = 0;
+    selection.shouldStop = false;
+
+    // Reset filters to defaults before loading preferences
+    filters.fileType.photos = true;
+    filters.fileType.videos = true;
+    filters.fileType.raw = false;
+    filters.dateRange.from = null;
+    filters.dateRange.to = null;
+    filters.orientation = 'any';
+
+    // Load saved preferences (optional - comment out to always start fresh)
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_PREFERENCES' });
+      if (response && response.lastUsedFilters) {
+        Object.assign(filters.fileType, response.lastUsedFilters.fileType);
+        Object.assign(filters.dateRange, response.lastUsedFilters.dateRange);
+        filters.orientation = response.lastUsedFilters.orientation;
+      }
+    } catch (e) {
+      console.warn('Could not load preferences:', e);
+    }
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'gpc-backdrop';
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) closeModal();
+    });
+
+    const modal = document.createElement('div');
+    modal.className = 'gpc-modal';
+    modal.innerHTML = getModalHTML();
+
+    backdrop.appendChild(modal);
+    state.container.appendChild(backdrop);
+    state.modal = backdrop;
+    state.isModalOpen = true;
+
+    // Bind event listeners
+    bindModalEvents(modal);
+    updateActionButton();
+  }
+
+  function closeModal() {
+    if (!state.modal) return;
+
+    // If selection is running, stop it
+    if (selection.isRunning) {
+      selection.shouldStop = true;
+    }
+
+    state.modal.remove();
+    state.modal = null;
+    state.isModalOpen = false;
+  }
+
+  function getModalHTML() {
+    return `
+      <div class="gpc-modal-header">
+        <div>
+          <h2 class="gpc-modal-title">Google Photos Cleaner</h2>
+          <p class="gpc-modal-subtitle">Quickly select photos and videos by type, date range, and orientation.</p>
+        </div>
+        <button class="gpc-close-btn" data-action="close">&times;</button>
+      </div>
+      <div class="gpc-modal-body" id="gpc-filter-view">
+        <!-- File Type -->
+        <div class="gpc-section">
+          <p class="gpc-section-title">File type</p>
+          <p class="gpc-section-hint">Choose what to include</p>
+          <div class="gpc-toggles">
+            <button class="gpc-toggle ${filters.fileType.photos ? 'active' : ''}" data-filter="photos">
+              <span class="gpc-toggle-check"></span>
+              Photos
+            </button>
+            <button class="gpc-toggle ${filters.fileType.videos ? 'active' : ''}" data-filter="videos">
+              <span class="gpc-toggle-check"></span>
+              Videos
+            </button>
+            <button class="gpc-toggle ${filters.fileType.raw ? 'active' : ''}" data-filter="raw">
+              <span class="gpc-toggle-check"></span>
+              RAW
+            </button>
+          </div>
+        </div>
+
+        <!-- Date Range -->
+        <div class="gpc-section">
+          <p class="gpc-section-title">Date range</p>
+          <p class="gpc-section-hint">Limit selection to a specific time period</p>
+          <div class="gpc-date-row">
+            <label class="gpc-date-label">From</label>
+            <input type="date" class="gpc-date-input" data-filter="date-from" value="${filters.dateRange.from || ''}">
+          </div>
+          <div class="gpc-date-row">
+            <label class="gpc-date-label">To</label>
+            <input type="date" class="gpc-date-input" data-filter="date-to" value="${filters.dateRange.to || ''}">
+          </div>
+        </div>
+
+        <!-- Orientation -->
+        <div class="gpc-section">
+          <p class="gpc-section-title">Orientation</p>
+          <p class="gpc-section-hint">Target landscape, portrait, or square photos</p>
+          <select class="gpc-select" data-filter="orientation">
+            <option value="any" ${filters.orientation === 'any' ? 'selected' : ''}>Any orientation</option>
+            <option value="landscape" ${filters.orientation === 'landscape' ? 'selected' : ''}>Landscape</option>
+            <option value="portrait" ${filters.orientation === 'portrait' ? 'selected' : ''}>Portrait</option>
+            <option value="square" ${filters.orientation === 'square' ? 'selected' : ''}>Square</option>
+          </select>
+        </div>
+
+        <button class="gpc-action-btn" data-action="start" disabled>Start Selection</button>
+        <p class="gpc-validation-hint" id="gpc-validation-hint"></p>
+      </div>
+      <div class="gpc-modal-body gpc-progress" id="gpc-progress-view" style="display: none;">
+        <div class="gpc-spinner"></div>
+        <p class="gpc-progress-label">Selecting...</p>
+        <p class="gpc-progress-count" id="gpc-progress-count">0</p>
+        <button class="gpc-action-btn stop" data-action="stop">Stop Selection</button>
+      </div>
+    `;
+  }
+
+  function bindModalEvents(modal) {
+    // Close button
+    modal.querySelector('[data-action="close"]').addEventListener('click', closeModal);
+
+    // File type toggles
+    modal.querySelectorAll('[data-filter="photos"], [data-filter="videos"], [data-filter="raw"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const filterKey = btn.dataset.filter;
+        filters.fileType[filterKey] = !filters.fileType[filterKey];
+        btn.classList.toggle('active', filters.fileType[filterKey]);
+        updateActionButton();
+      });
+    });
+
+    // Date inputs
+    modal.querySelector('[data-filter="date-from"]').addEventListener('change', (e) => {
+      filters.dateRange.from = e.target.value || null;
+      updateActionButton();
+    });
+
+    modal.querySelector('[data-filter="date-to"]').addEventListener('change', (e) => {
+      filters.dateRange.to = e.target.value || null;
+      updateActionButton();
+    });
+
+    // Orientation select
+    modal.querySelector('[data-filter="orientation"]').addEventListener('change', (e) => {
+      filters.orientation = e.target.value;
+      updateActionButton();
+    });
+
+    // Start button
+    modal.querySelector('[data-action="start"]').addEventListener('click', startSelection);
+
+    // Stop button
+    modal.querySelector('[data-action="stop"]').addEventListener('click', () => {
+      selection.shouldStop = true;
+    });
+  }
+
+  function updateActionButton() {
+    if (!state.modal) return;
+
+    const btn = state.modal.querySelector('[data-action="start"]');
+    const hint = state.modal.querySelector('#gpc-validation-hint');
+
+    // Check if filters would select everything
+    const noDateFilter = !filters.dateRange.from && !filters.dateRange.to;
+    const noOrientationFilter = filters.orientation === 'any';
+
+    // Require at least one meaningful filter
+    const hasFilter = !noDateFilter || !noOrientationFilter || !filters.fileType.photos || !filters.fileType.videos || filters.fileType.raw;
+
+    if (!hasFilter) {
+      btn.disabled = true;
+      hint.textContent = 'Set at least one filter to start selection';
+    } else if (!filters.fileType.photos && !filters.fileType.videos && !filters.fileType.raw) {
+      btn.disabled = true;
+      hint.textContent = 'Select at least one file type';
+    } else {
+      btn.disabled = false;
+      hint.textContent = '';
+    }
+  }
+
+  async function startSelection() {
+    if (selection.isRunning) return;
+
+    // Save current filters for next time
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'SAVE_FILTERS',
+        filters: {
+          fileType: { ...filters.fileType },
+          dateRange: { ...filters.dateRange },
+          orientation: filters.orientation
+        }
+      });
+    } catch (e) {
+      console.warn('Could not save filters:', e);
+    }
+
+    // Switch to progress view
+    selection.isRunning = true;
+    selection.count = 0;
+    selection.shouldStop = false;
+
+    const filterView = state.modal.querySelector('#gpc-filter-view');
+    const progressView = state.modal.querySelector('#gpc-progress-view');
+    filterView.style.display = 'none';
+    progressView.style.display = 'block';
+
+    updateProgressCount(0);
+
+    // Scroll to top first
+    scrollToTop();
+    await wait(500);
+
+    // Run selection loop
+    await runSelectionLoop();
+
+    // Complete
+    const finalCount = selection.count;
+    selection.isRunning = false;
+
+    // Show completion state in modal (don't auto-close)
+    showCompletionState(finalCount);
+  }
+
+  function showCompletionState(count) {
+    if (!state.modal) return;
+
+    const progressView = state.modal.querySelector('#gpc-progress-view');
+    if (!progressView) return;
+
+    // Update the progress view to show completion
+    const spinner = progressView.querySelector('.gpc-spinner');
+    const label = progressView.querySelector('.gpc-progress-label');
+    const countEl = progressView.querySelector('#gpc-progress-count');
+    const stopBtn = progressView.querySelector('[data-action="stop"]');
+
+    // Hide spinner, show checkmark
+    if (spinner) {
+      spinner.style.display = 'none';
+    }
+
+    // Update label
+    if (label) {
+      if (count === 0) {
+        label.textContent = 'No photos matched your filters';
+        label.style.color = '#f59e0b';
+      } else {
+        label.textContent = 'Selection complete!';
+        label.style.color = '#22c55e';
+      }
+    }
+
+    // Update count display
+    if (countEl) {
+      countEl.textContent = count.toLocaleString();
+      if (count > 0) {
+        countEl.style.color = '#22c55e';
+      }
+    }
+
+    // Change stop button to done button
+    if (stopBtn) {
+      stopBtn.textContent = 'Done';
+      stopBtn.classList.remove('stop');
+      stopBtn.style.background = '#22c55e';
+      stopBtn.dataset.action = 'done';
+      stopBtn.onclick = closeModal;
+    }
+  }
+
+  async function runSelectionLoop() {
+    const processedElements = new Set();
+    let noNewPhotosCount = 0;
+    let errorCount = 0;
+    const MAX_NO_NEW = 3;
+    const MAX_ERRORS = 5;
+    const CLICK_DELAY = 75;
+    const SCROLL_DELAY = 400;
+
+    while (!selection.shouldStop) {
+      try {
+        const photos = findPhotoElements();
+
+        // Check if we can find any photos
+        if (photos.length === 0 && processedElements.size === 0) {
+          errorCount++;
+          if (errorCount >= MAX_ERRORS) {
+            showErrorToast('Unable to find photos. Google may have updated their UI.');
+            break;
+          }
+          await wait(1000);
+          continue;
+        }
+
+        errorCount = 0;
+        let foundNew = false;
+
+        for (const container of photos) {
+          if (selection.shouldStop) break;
+
+          // Generate unique key from checkbox aria-label or position
+          const checkbox = getCheckbox(container);
+          const photoEl = container.querySelector('[data-latest-bg]');
+          const key = checkbox?.getAttribute('aria-label') ||
+                      photoEl?.getAttribute('data-latest-bg') ||
+                      container.getBoundingClientRect().top + '-' + container.getBoundingClientRect().left;
+
+          if (processedElements.has(key)) continue;
+          processedElements.add(key);
+          foundNew = true;
+
+          if (!matchesFilters(container)) continue;
+          if (isSelected(container)) continue;
+
           try {
-            await selectPhoto(photo);
-            selectionState.selectedCount++;
-            updateProgress(selectionState.selectedCount);
+            const selected = selectPhoto(container);
+            if (selected) {
+              selection.count++;
+              updateProgressCount(selection.count);
+            }
           } catch (e) {
             console.warn('Failed to select photo:', e);
-            // Continue with next photo
           }
-          await wait(selectionState.settings.clickDelay);
-        }
-      }
 
-      const scrollInfo = getScrollInfo();
-      if (!newPhotosFound) {
-        noNewPhotosCount++;
-        if (noNewPhotosCount >= MAX_NO_NEW_PHOTOS || scrollInfo.atBottom) {
+          await wait(CLICK_DELAY);
+        }
+
+        if (!foundNew) {
+          noNewPhotosCount++;
+          if (noNewPhotosCount >= MAX_NO_NEW || isAtBottom()) {
+            break;
+          }
+        } else {
+          noNewPhotosCount = 0;
+        }
+
+        scrollDown();
+        await wait(SCROLL_DELAY);
+
+      } catch (error) {
+        console.error('Selection loop error:', error);
+        errorCount++;
+        if (errorCount >= MAX_ERRORS) {
+          showErrorToast('Selection failed. Please try again.');
           break;
         }
-      } else {
-        noNewPhotosCount = 0;
+        await wait(1000);
       }
-
-      scrollDown();
-      await wait(selectionState.settings.scrollDelay);
-
-    } catch (error) {
-      console.error('Selection loop error:', error);
-      consecutiveErrors++;
-      if (consecutiveErrors >= MAX_ERRORS) {
-        updateProgress(selectionState.selectedCount, 'Error: Selection failed. Try again.');
-        stopSelection();
-        return;
-      }
-      await wait(1000);
     }
   }
 
-  if (selectionState.isRunning && !selectionState.isPaused) {
-    completeSelection();
-  }
-}
-
-// Pause selection
-function pauseSelection() {
-  selectionState.isPaused = true;
-  updateProgress(selectionState.selectedCount, 'Paused');
-  console.log('Selection paused at', selectionState.selectedCount, 'photos');
-}
-
-// Resume selection
-async function resumeSelection() {
-  if (!selectionState.isRunning) return;
-  selectionState.isPaused = false;
-  updateProgress(selectionState.selectedCount, 'Resuming...');
-  console.log('Resuming selection...');
-  await runSelectionLoop();
-}
-
-// Stop selection completely
-function stopSelection() {
-  selectionState.isRunning = false;
-  selectionState.isPaused = false;
-  updateProgress(selectionState.selectedCount, 'Stopped');
-  console.log('Selection stopped at', selectionState.selectedCount, 'photos');
-
-  // Notify background script
-  chrome.runtime.sendMessage({
-    type: 'SELECTION_STOPPED',
-    batchId: selectionState.batchId,
-    photosSelected: selectionState.selectedCount
-  });
-}
-
-// Complete selection
-function completeSelection() {
-  selectionState.isRunning = false;
-  updateProgress(selectionState.selectedCount, 'Complete!');
-  console.log('Selection complete:', selectionState.selectedCount, 'photos selected');
-
-  // Notify background script
-  chrome.runtime.sendMessage({
-    type: 'SELECTION_COMPLETE',
-    batchId: selectionState.batchId,
-    photosSelected: selectionState.selectedCount
-  });
-}
-
-// Listen for messages from popup/background
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  switch (message.type) {
-    case 'START_SELECTION':
-      startSelection(message.batchId, message.settings);
-      sendResponse({ success: true });
-      break;
-
-    case 'PAUSE_SELECTION':
-      pauseSelection();
-      sendResponse({ success: true });
-      break;
-
-    case 'RESUME_SELECTION':
-      resumeSelection();
-      sendResponse({ success: true });
-      break;
-
-    case 'STOP_SELECTION':
-      stopSelection();
-      sendResponse({ success: true });
-      break;
-
-    case 'GET_SELECTION_STATUS':
-      sendResponse({
-        isRunning: selectionState.isRunning,
-        isPaused: selectionState.isPaused,
-        selectedCount: selectionState.selectedCount
-      });
-      break;
-  }
-  return true;
-});
-
-// Detect if user navigates away from photos search results
-let lastUrl = location.href;
-const urlObserver = new MutationObserver(() => {
-  if (location.href !== lastUrl) {
-    lastUrl = location.href;
-
-    // If selection is running and we left the search results
-    if (selectionState.isRunning && !location.href.includes('photos.google.com/search')) {
-      pauseSelection();
-      updateProgress(selectionState.selectedCount, 'Paused: Navigate back to continue');
+  function updateProgressCount(count) {
+    if (!state.modal) return;
+    const countEl = state.modal.querySelector('#gpc-progress-count');
+    if (countEl) {
+      countEl.textContent = count.toLocaleString();
     }
   }
-});
 
-urlObserver.observe(document.body, { childList: true, subtree: true });
+  function showToast(count) {
+    const toast = document.createElement('div');
+    toast.className = 'gpc-toast';
+    toast.innerHTML = `
+      <span class="gpc-toast-icon">&#10003;</span>
+      <span>${count.toLocaleString()} photos selected</span>
+    `;
+    state.container.appendChild(toast);
 
-// Export for debugging and testing
-window.PhotosCleanup = {
-  findVisiblePhotos,
-  isPhotoSelected,
-  selectPhoto,
-  scrollDown,
-  scrollToTop,
-  wait,
-  getScrollInfo,
-  startSelection,
-  pauseSelection,
-  resumeSelection,
-  stopSelection,
-  getState: () => selectionState
-};
+    // Auto-dismiss after 4 seconds
+    setTimeout(() => {
+      toast.classList.add('hiding');
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
+  function showErrorToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'gpc-toast';
+    toast.style.background = '#7f1d1d';
+    toast.innerHTML = `
+      <span class="gpc-toast-icon" style="color: #fca5a5;">!</span>
+      <span>${message}</span>
+    `;
+    state.container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.classList.add('hiding');
+      setTimeout(() => toast.remove(), 300);
+    }, 5000);
+  }
+
+  function showNoMatchToast() {
+    const toast = document.createElement('div');
+    toast.className = 'gpc-toast';
+    toast.style.background = '#78350f';
+    toast.innerHTML = `
+      <span class="gpc-toast-icon" style="color: #fcd34d;">!</span>
+      <span>No photos matched your filters</span>
+    `;
+    state.container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.classList.add('hiding');
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
+  // Initialize when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', injectTriggerButton);
+  } else {
+    // Use setTimeout to ensure Google Photos UI has rendered
+    setTimeout(injectTriggerButton, 500);
+  }
+
+  // Re-inject if header changes (Google Photos is an SPA)
+  const observer = new MutationObserver(() => {
+    if (!document.getElementById('gpc-trigger-button')) {
+      injectTriggerButton();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+})();

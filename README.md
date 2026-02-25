@@ -1,8 +1,8 @@
-# Photos Cleanup Assistant
+# Google Photos Cleaner
 
-A Chrome extension that helps you select Google Photos by date range for manual cleanup.
+A Chrome extension that helps you select Google Photos by type, date range, and orientation for bulk cleanup.
 
-**This extension does NOT delete photos.** It selects photos matching your criteria, then you manually choose what to do with them (Download, Delete, Add to Album).
+**This extension does NOT delete photos.** It selects photos matching your criteria, then you manually choose what to do with them (Delete, Download, Add to Album).
 
 ## Installation (Development)
 
@@ -13,20 +13,23 @@ A Chrome extension that helps you select Google Photos by date range for manual 
 
 ## Usage
 
-1. Click the extension icon
-2. Click "New Batch"
-3. Enter a name and date range
+1. Go to [Google Photos](https://photos.google.com)
+2. Click the blue "Cleaner" button in the header
+3. Set your filters:
+   - **File type**: Photos, Videos, RAW
+   - **Date range**: From/To dates
+   - **Orientation**: Landscape, Portrait, Square
 4. Click "Start Selection"
 5. Watch as photos are automatically selected
-6. When done, manually click Download, Delete, or other actions
+6. When done, use Google Photos' built-in actions (Delete, Download, etc.)
 
 ## Features
 
-- **Date range selection**: Select all photos within a date range
-- **Progress tracking**: See how many photos are selected in real-time
-- **Pause/Resume**: Take a break and continue later
-- **Batch history**: Keep track of cleanup sessions
-- **Adjustable speed**: Configure selection timing in settings
+- **In-page overlay**: Never leave Google Photos
+- **Multiple filters**: Combine type, date, and orientation
+- **Progress tracking**: See selection count in real-time
+- **Stop anytime**: Cancel selection and keep what's selected
+- **Remembers settings**: Your last filter settings are saved
 
 ## Privacy
 
@@ -38,8 +41,8 @@ A Chrome extension that helps you select Google Photos by date range for manual 
 ## Limitations
 
 - DOM selectors may break if Google updates their UI
-- Large batches (2500+ photos) may take several minutes
-- Selection requires the Google Photos tab to remain active
+- RAW file detection is limited
+- Orientation detection requires image to be loaded
 
 ## License
 

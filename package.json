@@ -1,0 +1,13 @@
+{
+  "name": "google-photos-cleaner",
+  "version": "0.1.0",
+  "description": "Chrome extension to select Google Photos by filters",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}
