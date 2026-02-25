@@ -561,6 +561,24 @@
     return null;
   }
 
+  // Compare two dates by year, month, day only (ignoring time/timezone)
+  function compareDatesOnly(date1, date2) {
+    const y1 = date1.getFullYear(), m1 = date1.getMonth(), d1 = date1.getDate();
+    const y2 = date2.getFullYear(), m2 = date2.getMonth(), d2 = date2.getDate();
+    if (y1 !== y2) return y1 - y2;
+    if (m1 !== m2) return m1 - m2;
+    return d1 - d2;
+  }
+
+  // Parse ISO date string (YYYY-MM-DD) to local date, avoiding timezone issues
+  function parseISODateString(dateString) {
+    const match = dateString.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
+    }
+    return new Date(dateString);
+  }
+
   // Check if photo matches current filters
   function matchesFilters(element) {
     // Check file type
@@ -582,15 +600,22 @@
         return false;
       }
 
+      console.log('Google Photos Cleaner: Photo date:', photoDate.toDateString(),
+        'Filter from:', filters.dateRange.from, 'to:', filters.dateRange.to);
+
       if (filters.dateRange.from) {
-        const fromDate = new Date(filters.dateRange.from);
-        fromDate.setHours(0, 0, 0, 0); // Start of day
-        if (photoDate < fromDate) return false;
+        const fromDate = parseISODateString(filters.dateRange.from);
+        if (compareDatesOnly(photoDate, fromDate) < 0) {
+          console.log('Google Photos Cleaner: Photo before date range, skipping');
+          return false;
+        }
       }
       if (filters.dateRange.to) {
-        const toDate = new Date(filters.dateRange.to);
-        toDate.setHours(23, 59, 59, 999); // End of day
-        if (photoDate > toDate) return false;
+        const toDate = parseISODateString(filters.dateRange.to);
+        if (compareDatesOnly(photoDate, toDate) > 0) {
+          console.log('Google Photos Cleaner: Photo after date range, skipping');
+          return false;
+        }
       }
     }
 
