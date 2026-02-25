@@ -963,6 +963,24 @@
     modal.querySelector('[data-action="stop"]').addEventListener('click', () => {
       selection.shouldStop = true;
     });
+
+    // Timeout continue button
+    const continueBtn = modal.querySelector('[data-action="continue"]');
+    if (continueBtn) {
+      continueBtn.addEventListener('click', () => {
+        hideTimeoutPrompt();
+      });
+    }
+
+    // Timeout stop button
+    const timeoutStopBtn = modal.querySelector('[data-action="timeout-stop"]');
+    if (timeoutStopBtn) {
+      timeoutStopBtn.addEventListener('click', () => {
+        selection.shouldStop = true;
+        selection.isPaused = false;
+        hideTimeoutPrompt();
+      });
+    }
   }
 
   function updateActionButton() {
