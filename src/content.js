@@ -1169,6 +1169,60 @@
     }
   }
 
+  function updateProgressLabel(text) {
+    if (!state.modal) return;
+    const label = state.modal.querySelector('#gpc-progress-label');
+    if (label) {
+      label.textContent = text;
+    }
+  }
+
+  function updateProgressStatus(text) {
+    if (!state.modal) return;
+    const status = state.modal.querySelector('#gpc-progress-status');
+    if (status) {
+      status.textContent = text;
+    }
+  }
+
+  function showTimeoutPrompt() {
+    if (!state.modal) return;
+
+    const progressView = state.modal.querySelector('#gpc-progress-view');
+    const timeoutView = state.modal.querySelector('#gpc-timeout-view');
+
+    if (progressView) progressView.style.display = 'none';
+    if (timeoutView) {
+      timeoutView.style.display = 'block';
+
+      // Update timeout view with current state
+      const dateEl = timeoutView.querySelector('#gpc-timeout-date');
+      const countEl = timeoutView.querySelector('#gpc-timeout-count');
+
+      if (dateEl) {
+        dateEl.textContent = `Currently viewing: ${formatDateForDisplay(selection.currentDateViewing)}`;
+      }
+      if (countEl) {
+        countEl.textContent = `Photos selected: ${selection.count}`;
+      }
+    }
+
+    selection.isPaused = true;
+  }
+
+  function hideTimeoutPrompt() {
+    if (!state.modal) return;
+
+    const progressView = state.modal.querySelector('#gpc-progress-view');
+    const timeoutView = state.modal.querySelector('#gpc-timeout-view');
+
+    if (timeoutView) timeoutView.style.display = 'none';
+    if (progressView) progressView.style.display = 'block';
+
+    selection.isPaused = false;
+    selection.startTime = Date.now(); // Reset timer
+  }
+
   function showToast(count) {
     const toast = document.createElement('div');
     toast.className = 'gpc-toast';
