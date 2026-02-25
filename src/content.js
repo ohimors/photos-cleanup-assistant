@@ -458,19 +458,54 @@
     return 'square';
   }
 
-  // Parse date from a date header element
+  // Parse date from a date header element or text
   function parseDateHeader(element) {
     // Try data-date attribute first
     const dataDate = element.getAttribute('data-date');
     if (dataDate) {
-      return new Date(dataDate);
+      const date = new Date(dataDate);
+      if (!isNaN(date.getTime())) {
+        console.log('Google Photos Cleaner: Found date from data-date:', dataDate, '->', date);
+        return date;
+      }
     }
 
-    // Try aria-label (e.g., "January 15, 2024")
-    const label = element.getAttribute('aria-label') || element.textContent || '';
-    const parsed = Date.parse(label);
-    if (!isNaN(parsed)) {
-      return new Date(parsed);
+    // Try aria-label (e.g., "January 15, 2024" or "Feb 23, 2026")
+    const label = element.getAttribute('aria-label') || '';
+    if (label) {
+      const parsed = Date.parse(label);
+      if (!isNaN(parsed)) {
+        const date = new Date(parsed);
+        console.log('Google Photos Cleaner: Found date from aria-label:', label, '->', date);
+        return date;
+      }
+    }
+
+    // Try text content (e.g., "Today", "Yesterday", "Monday, February 23, 2026")
+    const text = element.textContent?.trim() || '';
+    if (text) {
+      // Handle relative dates
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (text.toLowerCase() === 'today') {
+        console.log('Google Photos Cleaner: Found date "Today" ->', today);
+        return today;
+      }
+      if (text.toLowerCase() === 'yesterday') {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        console.log('Google Photos Cleaner: Found date "Yesterday" ->', yesterday);
+        return yesterday;
+      }
+
+      // Try parsing the text directly
+      const parsed = Date.parse(text);
+      if (!isNaN(parsed)) {
+        const date = new Date(parsed);
+        console.log('Google Photos Cleaner: Found date from text:', text, '->', date);
+        return date;
+      }
     }
 
     return null;
@@ -478,21 +513,51 @@
 
   // Find the date header for a photo element
   function findDateForPhoto(photoElement) {
-    // Walk backwards through siblings and parents to find date header
+    // Strategy 1: Look for date header in DOM hierarchy
+    // Google Photos typically has date headers as siblings or ancestors of photo groups
+
     let current = photoElement;
-    while (current) {
-      // Check previous siblings
+    let depth = 0;
+    const maxDepth = 10; // Don't go too far up
+
+    while (current && depth < maxDepth) {
+      // Check previous siblings for date headers
       let sibling = current.previousElementSibling;
-      while (sibling) {
-        const dateEl = sibling.matches(SELECTORS.dateHeader) ? sibling : sibling.querySelector(SELECTORS.dateHeader);
-        if (dateEl) {
-          return parseDateHeader(dateEl);
+      let siblingCount = 0;
+      const maxSiblings = 20; // Don't check too many siblings
+
+      while (sibling && siblingCount < maxSiblings) {
+        // Look for elements that might be date headers
+        const dateSelectors = [
+          '[data-date]',
+          '[role="heading"]',
+          'h2', 'h3',
+          '[class*="date"]',
+          '[class*="Date"]'
+        ];
+
+        for (const selector of dateSelectors) {
+          const dateEl = sibling.matches(selector) ? sibling : sibling.querySelector(selector);
+          if (dateEl) {
+            const date = parseDateHeader(dateEl);
+            if (date) return date;
+          }
         }
+
+        // Also check the sibling itself for date-like text
+        const siblingDate = parseDateHeader(sibling);
+        if (siblingDate) return siblingDate;
+
         sibling = sibling.previousElementSibling;
+        siblingCount++;
       }
+
       // Move up to parent
       current = current.parentElement;
+      depth++;
     }
+
+    console.log('Google Photos Cleaner: Could not find date for photo element');
     return null;
   }
 
@@ -510,16 +575,22 @@
     // Check date range
     if (filters.dateRange.from || filters.dateRange.to) {
       const photoDate = findDateForPhoto(element);
-      if (photoDate) {
-        if (filters.dateRange.from) {
-          const fromDate = new Date(filters.dateRange.from);
-          if (photoDate < fromDate) return false;
-        }
-        if (filters.dateRange.to) {
-          const toDate = new Date(filters.dateRange.to);
-          toDate.setHours(23, 59, 59, 999); // Include the entire end day
-          if (photoDate > toDate) return false;
-        }
+
+      // If we can't determine the date and a date filter is set, skip this photo
+      if (!photoDate) {
+        console.log('Google Photos Cleaner: Could not determine date for photo, skipping');
+        return false;
+      }
+
+      if (filters.dateRange.from) {
+        const fromDate = new Date(filters.dateRange.from);
+        fromDate.setHours(0, 0, 0, 0); // Start of day
+        if (photoDate < fromDate) return false;
+      }
+      if (filters.dateRange.to) {
+        const toDate = new Date(filters.dateRange.to);
+        toDate.setHours(23, 59, 59, 999); // End of day
+        if (photoDate > toDate) return false;
       }
     }
 
