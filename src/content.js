@@ -640,6 +640,37 @@
     return true;
   }
 
+  // Check if a photo's date is before the "from" date (scrolled past target range)
+  function isBeforeTargetRange(container) {
+    if (!filters.dateRange.from) return false; // No from date, can't determine
+
+    const metadata = getPhotoMetadata(container);
+    if (!metadata || !metadata.date) return false;
+
+    const fromDate = parseISODateString(filters.dateRange.from);
+    return compareDatesOnly(metadata.date, fromDate) < 0;
+  }
+
+  // Check if a photo's date is within the target range
+  function isWithinTargetRange(container) {
+    const metadata = getPhotoMetadata(container);
+    if (!metadata || !metadata.date) return false;
+
+    const photoDate = metadata.date;
+
+    if (filters.dateRange.from) {
+      const fromDate = parseISODateString(filters.dateRange.from);
+      if (compareDatesOnly(photoDate, fromDate) < 0) return false;
+    }
+
+    if (filters.dateRange.to) {
+      const toDate = parseISODateString(filters.dateRange.to);
+      if (compareDatesOnly(photoDate, toDate) > 0) return false;
+    }
+
+    return true;
+  }
+
   // Check if photo container is already selected
   function isSelected(container) {
     const checkbox = getCheckbox(container);
