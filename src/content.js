@@ -632,48 +632,110 @@
 
   // Check if element is already selected
   function isSelected(element) {
-    // Google Photos shows selection state via various attributes
+    // Google Photos shows selection state via aria-checked="true" on the checkbox
+    // The checkbox is in a parent container, not inside the element
+
+    // Check the element itself
     if (element.getAttribute('aria-selected') === 'true') return true;
-    if (element.querySelector('[aria-checked="true"]')) return true;
-    if (element.querySelector('[role="checkbox"][aria-checked="true"]')) return true;
-    // Check for selection checkmark or selected class
-    if (element.querySelector('svg[data-icon="check"], .check-icon')) return true;
     if (element.classList.contains('selected')) return true;
-    // Check for Google's selection indicator classes
-    if (element.querySelector('.ckGgle.checked, .jfk-checkbox-checked')) return true;
+
+    // Search parent containers for a checked checkbox
+    let container = element.parentElement;
+    let depth = 0;
+    const maxDepth = 5;
+
+    while (container && depth < maxDepth) {
+      // Look for checkbox with aria-checked="true"
+      const checkbox = container.querySelector('[role="checkbox"][aria-checked="true"]') ||
+                       container.querySelector('.ckGgle[aria-checked="true"]');
+      if (checkbox) {
+        // Verify it's associated with our element (same container)
+        if (container.contains(element)) {
+          return true;
+        }
+      }
+      container = container.parentElement;
+      depth++;
+    }
+
     return false;
   }
 
   // Select a photo element by clicking its checkbox
   function selectPhoto(element) {
     // Google Photos shows a checkbox on hover - we need to find and click it
-    // The checkbox may be hidden until hover, so we trigger hover first
+    // The checkbox is NOT inside the photo element, but in a sibling or parent container
 
-    // Trigger mouseenter to reveal checkbox
+    // Trigger mouseenter to reveal checkbox (on element and parents)
     element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
     element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
 
-    // Small delay to let checkbox appear
-    // Look for checkbox elements - Google Photos uses various selectors
+    // Google Photos checkbox selectors - the actual checkbox structure:
+    // <div role="checkbox" class="QcpS9c ckGgle" aria-checked="false">
     const checkboxSelectors = [
+      '[role="checkbox"].ckGgle',    // Most specific - Google's checkbox
+      '[role="checkbox"][aria-checked]',
+      '.QcpS9c.ckGgle',               // Google's checkbox classes
       '[role="checkbox"]',
-      '[aria-checked]',
-      'input[type="checkbox"]',
-      '[data-selection-toggle]',
-      '.ckGgle',  // Google's checkbox class
-      '[jsaction*="select"]',
-      '[jsaction*="toggle"]'
+      '.ckGgle[aria-checked]'
     ];
 
     let checkbox = null;
-    for (const selector of checkboxSelectors) {
-      checkbox = element.querySelector(selector);
-      if (checkbox) break;
+
+    // Strategy 1: Look for checkbox within the same parent container
+    // The photo and checkbox are often siblings within a wrapper
+    let container = element.parentElement;
+    let depth = 0;
+    const maxDepth = 5;
+
+    while (container && depth < maxDepth && !checkbox) {
+      for (const selector of checkboxSelectors) {
+        checkbox = container.querySelector(selector);
+        if (checkbox) {
+          // Verify this checkbox is associated with our photo element
+          // by checking they share a close ancestor
+          const checkboxContainer = checkbox.closest('[data-latest-bg], [data-media-key]')?.parentElement ||
+                                   checkbox.parentElement;
+          const photoContainer = element.closest('[data-latest-bg], [data-media-key]')?.parentElement ||
+                                element.parentElement;
+
+          // If containers are the same or very close, it's the right checkbox
+          if (checkboxContainer === photoContainer ||
+              checkboxContainer === container ||
+              photoContainer === container) {
+            break;
+          }
+          // If the checkbox is within the same container we're searching, use it
+          if (container.contains(checkbox) && container.contains(element)) {
+            break;
+          }
+          // Otherwise, keep looking
+          checkbox = null;
+        }
+      }
+      container = container.parentElement;
+      depth++;
+    }
+
+    // Strategy 2: If no checkbox found, try triggering hover on parent
+    if (!checkbox) {
+      const photoWrapper = element.parentElement;
+      if (photoWrapper) {
+        photoWrapper.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        photoWrapper.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+
+        // Try again after hover on parent
+        for (const selector of checkboxSelectors) {
+          checkbox = photoWrapper.querySelector(selector);
+          if (checkbox) break;
+        }
+      }
     }
 
     if (checkbox) {
       // Click the checkbox directly
       checkbox.click();
+      console.log('Google Photos Cleaner: Clicked checkbox for photo');
       return true;
     }
 
