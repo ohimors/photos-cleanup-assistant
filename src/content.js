@@ -404,161 +404,88 @@
 
   // DOM Selectors - may need updating if Google changes their UI
   const SELECTORS = {
-    // Photo grid items - Google uses various attributes
-    photoItem: '[data-latest-bg], [data-media-key], [jsaction*="click:"]',
-    // Video indicator - duration badge or play icon
-    videoIndicator: '[data-video-preview], [aria-label*="Video"], [aria-label*="video"]',
-    // Date headers in the photo grid
-    dateHeader: '[data-date], [aria-label*="20"]',
-    // Photo image element for orientation detection
-    photoImage: 'img[src*="googleusercontent"]'
+    // Photo container - the div that contains both photo and checkbox
+    photoContainer: 'div.rtIMgb',
+    // Photo checkbox with aria-label containing all metadata
+    photoCheckbox: '[role="checkbox"].ckGgle',
+    // Photo image element
+    photoImage: '[data-latest-bg]'
   };
 
-  // Find all visible photo elements
-  function findPhotoElements() {
-    const items = document.querySelectorAll(SELECTORS.photoItem);
-    return Array.from(items).filter(el => {
-      const rect = el.getBoundingClientRect();
+  // Parse the checkbox aria-label to extract metadata
+  // Format: "Photo - Portrait - Feb 25, 2026, 8:46:07 AM"
+  // Format: "Video - Landscape - Feb 23, 2026, 11:44:02 PM"
+  function parseCheckboxLabel(ariaLabel) {
+    if (!ariaLabel) return null;
+
+    const result = {
+      type: 'photo',      // 'photo' | 'video'
+      orientation: 'unknown', // 'portrait' | 'landscape' | 'square' | 'unknown'
+      date: null          // Date object
+    };
+
+    // Extract type (Photo or Video)
+    if (ariaLabel.toLowerCase().startsWith('video')) {
+      result.type = 'video';
+    } else if (ariaLabel.toLowerCase().startsWith('photo')) {
+      result.type = 'photo';
+    }
+
+    // Extract orientation
+    const lowerLabel = ariaLabel.toLowerCase();
+    if (lowerLabel.includes('portrait')) {
+      result.orientation = 'portrait';
+    } else if (lowerLabel.includes('landscape')) {
+      result.orientation = 'landscape';
+    } else if (lowerLabel.includes('square')) {
+      result.orientation = 'square';
+    }
+
+    // Extract date - format is "Feb 25, 2026, 8:46:07 AM" at the end
+    // Try to match date pattern after the orientation
+    const dateMatch = ariaLabel.match(/(\w{3}\s+\d{1,2},\s+\d{4})/);
+    if (dateMatch) {
+      const parsed = Date.parse(dateMatch[1]);
+      if (!isNaN(parsed)) {
+        result.date = new Date(parsed);
+      }
+    }
+
+    return result;
+  }
+
+  // Find all visible photo containers with their checkboxes
+  function findPhotoContainers() {
+    const containers = document.querySelectorAll(SELECTORS.photoContainer);
+    return Array.from(containers).filter(container => {
+      // Must have a checkbox
+      const checkbox = container.querySelector(SELECTORS.photoCheckbox);
+      if (!checkbox) return false;
+
+      // Must be visible
+      const rect = container.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     });
   }
 
-  // Check if element is a video
-  function isVideo(element) {
-    // Check for video indicator within the element
-    if (element.querySelector(SELECTORS.videoIndicator)) return true;
-    // Check aria-label
-    const label = element.getAttribute('aria-label') || '';
-    if (label.toLowerCase().includes('video')) return true;
-    // Check for duration text (e.g., "0:30")
-    const text = element.textContent || '';
-    if (/\d+:\d{2}/.test(text)) return true;
-    return false;
+  // Get checkbox from a photo container
+  function getCheckbox(container) {
+    return container.querySelector(SELECTORS.photoCheckbox);
   }
 
-  // Check if element is a RAW file (limited detection)
-  function isRaw(element) {
-    const label = element.getAttribute('aria-label') || '';
-    return /\.(dng|cr2|cr3|nef|arw|orf|rw2|raw)$/i.test(label);
+  // Get photo metadata from checkbox aria-label
+  function getPhotoMetadata(container) {
+    const checkbox = getCheckbox(container);
+    if (!checkbox) return null;
+
+    const ariaLabel = checkbox.getAttribute('aria-label');
+    return parseCheckboxLabel(ariaLabel);
   }
 
-  // Get orientation from image dimensions
-  function getOrientation(element) {
-    const img = element.querySelector(SELECTORS.photoImage);
-    if (!img) return 'unknown';
-
-    const width = img.naturalWidth || img.width;
-    const height = img.naturalHeight || img.height;
-
-    if (!width || !height) return 'unknown';
-
-    const ratio = width / height;
-    if (ratio > 1.1) return 'landscape';
-    if (ratio < 0.9) return 'portrait';
-    return 'square';
-  }
-
-  // Parse date from a date header element or text
-  function parseDateHeader(element) {
-    // Try data-date attribute first
-    const dataDate = element.getAttribute('data-date');
-    if (dataDate) {
-      const date = new Date(dataDate);
-      if (!isNaN(date.getTime())) {
-        console.log('Google Photos Cleaner: Found date from data-date:', dataDate, '->', date);
-        return date;
-      }
-    }
-
-    // Try aria-label (e.g., "January 15, 2024" or "Feb 23, 2026")
-    const label = element.getAttribute('aria-label') || '';
-    if (label) {
-      const parsed = Date.parse(label);
-      if (!isNaN(parsed)) {
-        const date = new Date(parsed);
-        console.log('Google Photos Cleaner: Found date from aria-label:', label, '->', date);
-        return date;
-      }
-    }
-
-    // Try text content (e.g., "Today", "Yesterday", "Monday, February 23, 2026")
-    const text = element.textContent?.trim() || '';
-    if (text) {
-      // Handle relative dates
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      if (text.toLowerCase() === 'today') {
-        console.log('Google Photos Cleaner: Found date "Today" ->', today);
-        return today;
-      }
-      if (text.toLowerCase() === 'yesterday') {
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        console.log('Google Photos Cleaner: Found date "Yesterday" ->', yesterday);
-        return yesterday;
-      }
-
-      // Try parsing the text directly
-      const parsed = Date.parse(text);
-      if (!isNaN(parsed)) {
-        const date = new Date(parsed);
-        console.log('Google Photos Cleaner: Found date from text:', text, '->', date);
-        return date;
-      }
-    }
-
-    return null;
-  }
-
-  // Find the date header for a photo element
-  function findDateForPhoto(photoElement) {
-    // Strategy 1: Look for date header in DOM hierarchy
-    // Google Photos typically has date headers as siblings or ancestors of photo groups
-
-    let current = photoElement;
-    let depth = 0;
-    const maxDepth = 10; // Don't go too far up
-
-    while (current && depth < maxDepth) {
-      // Check previous siblings for date headers
-      let sibling = current.previousElementSibling;
-      let siblingCount = 0;
-      const maxSiblings = 20; // Don't check too many siblings
-
-      while (sibling && siblingCount < maxSiblings) {
-        // Look for elements that might be date headers
-        const dateSelectors = [
-          '[data-date]',
-          '[role="heading"]',
-          'h2', 'h3',
-          '[class*="date"]',
-          '[class*="Date"]'
-        ];
-
-        for (const selector of dateSelectors) {
-          const dateEl = sibling.matches(selector) ? sibling : sibling.querySelector(selector);
-          if (dateEl) {
-            const date = parseDateHeader(dateEl);
-            if (date) return date;
-          }
-        }
-
-        // Also check the sibling itself for date-like text
-        const siblingDate = parseDateHeader(sibling);
-        if (siblingDate) return siblingDate;
-
-        sibling = sibling.previousElementSibling;
-        siblingCount++;
-      }
-
-      // Move up to parent
-      current = current.parentElement;
-      depth++;
-    }
-
-    console.log('Google Photos Cleaner: Could not find date for photo element');
-    return null;
+  // Legacy function for compatibility - find photo elements
+  function findPhotoElements() {
+    // Return photo containers instead
+    return findPhotoContainers();
   }
 
   // Compare two dates by year, month, day only (ignoring time/timezone)
@@ -579,20 +506,27 @@
     return new Date(dateString);
   }
 
-  // Check if photo matches current filters
-  function matchesFilters(element) {
+  // Check if photo container matches current filters
+  function matchesFilters(container) {
+    // Get metadata from checkbox aria-label
+    const metadata = getPhotoMetadata(container);
+
+    if (!metadata) {
+      console.log('Google Photos Cleaner: Could not get metadata for container, skipping');
+      return false;
+    }
+
     // Check file type
-    const isVid = isVideo(element);
-    const isRawFile = isRaw(element);
-    const isPhoto = !isVid && !isRawFile;
+    const isPhoto = metadata.type === 'photo';
+    const isVid = metadata.type === 'video';
 
     if (isPhoto && !filters.fileType.photos) return false;
     if (isVid && !filters.fileType.videos) return false;
-    if (isRawFile && !filters.fileType.raw) return false;
+    // Note: RAW detection not available from aria-label, assume photos include RAW for now
 
     // Check date range
     if (filters.dateRange.from || filters.dateRange.to) {
-      const photoDate = findDateForPhoto(element);
+      const photoDate = metadata.date;
 
       // If we can't determine the date and a date filter is set, skip this photo
       if (!photoDate) {
@@ -621,7 +555,7 @@
 
     // Check orientation (photos only)
     if (filters.orientation !== 'any' && isPhoto) {
-      const orientation = getOrientation(element);
+      const orientation = metadata.orientation;
       if (orientation !== 'unknown' && orientation !== filters.orientation) {
         return false;
       }
@@ -630,107 +564,21 @@
     return true;
   }
 
-  // Check if element is already selected
-  function isSelected(element) {
-    // Google Photos shows selection state via aria-checked="true" on the checkbox
-    // The checkbox is in a parent container, not inside the element
+  // Check if photo container is already selected
+  function isSelected(container) {
+    const checkbox = getCheckbox(container);
+    if (!checkbox) return false;
 
-    // Check the element itself
-    if (element.getAttribute('aria-selected') === 'true') return true;
-    if (element.classList.contains('selected')) return true;
-
-    // Search parent containers for a checked checkbox
-    let container = element.parentElement;
-    let depth = 0;
-    const maxDepth = 5;
-
-    while (container && depth < maxDepth) {
-      // Look for checkbox with aria-checked="true"
-      const checkbox = container.querySelector('[role="checkbox"][aria-checked="true"]') ||
-                       container.querySelector('.ckGgle[aria-checked="true"]');
-      if (checkbox) {
-        // Verify it's associated with our element (same container)
-        if (container.contains(element)) {
-          return true;
-        }
-      }
-      container = container.parentElement;
-      depth++;
-    }
-
-    return false;
+    return checkbox.getAttribute('aria-checked') === 'true';
   }
 
-  // Select a photo element by clicking its checkbox
-  function selectPhoto(element) {
-    // Google Photos shows a checkbox on hover - we need to find and click it
-    // The checkbox is NOT inside the photo element, but in a sibling or parent container
+  // Select a photo by clicking its checkbox
+  function selectPhoto(container) {
+    // Trigger mouseenter to ensure checkbox is interactive
+    container.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    container.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
 
-    // Trigger mouseenter to reveal checkbox (on element and parents)
-    element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-    element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-
-    // Google Photos checkbox selectors - the actual checkbox structure:
-    // <div role="checkbox" class="QcpS9c ckGgle" aria-checked="false">
-    const checkboxSelectors = [
-      '[role="checkbox"].ckGgle',    // Most specific - Google's checkbox
-      '[role="checkbox"][aria-checked]',
-      '.QcpS9c.ckGgle',               // Google's checkbox classes
-      '[role="checkbox"]',
-      '.ckGgle[aria-checked]'
-    ];
-
-    let checkbox = null;
-
-    // Strategy 1: Look for checkbox within the same parent container
-    // The photo and checkbox are often siblings within a wrapper
-    let container = element.parentElement;
-    let depth = 0;
-    const maxDepth = 5;
-
-    while (container && depth < maxDepth && !checkbox) {
-      for (const selector of checkboxSelectors) {
-        checkbox = container.querySelector(selector);
-        if (checkbox) {
-          // Verify this checkbox is associated with our photo element
-          // by checking they share a close ancestor
-          const checkboxContainer = checkbox.closest('[data-latest-bg], [data-media-key]')?.parentElement ||
-                                   checkbox.parentElement;
-          const photoContainer = element.closest('[data-latest-bg], [data-media-key]')?.parentElement ||
-                                element.parentElement;
-
-          // If containers are the same or very close, it's the right checkbox
-          if (checkboxContainer === photoContainer ||
-              checkboxContainer === container ||
-              photoContainer === container) {
-            break;
-          }
-          // If the checkbox is within the same container we're searching, use it
-          if (container.contains(checkbox) && container.contains(element)) {
-            break;
-          }
-          // Otherwise, keep looking
-          checkbox = null;
-        }
-      }
-      container = container.parentElement;
-      depth++;
-    }
-
-    // Strategy 2: If no checkbox found, try triggering hover on parent
-    if (!checkbox) {
-      const photoWrapper = element.parentElement;
-      if (photoWrapper) {
-        photoWrapper.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-        photoWrapper.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-
-        // Try again after hover on parent
-        for (const selector of checkboxSelectors) {
-          checkbox = photoWrapper.querySelector(selector);
-          if (checkbox) break;
-        }
-      }
-    }
+    const checkbox = getCheckbox(container);
 
     if (checkbox) {
       // Click the checkbox directly
@@ -739,8 +587,8 @@
       return true;
     }
 
-    // No checkbox found - do NOT click the element (would navigate away)
-    console.warn('Google Photos Cleaner: Could not find checkbox for photo element');
+    // No checkbox found
+    console.warn('Google Photos Cleaner: Could not find checkbox for photo container');
     return false;
   }
 
@@ -1173,22 +1021,25 @@
         errorCount = 0;
         let foundNew = false;
 
-        for (const photo of photos) {
+        for (const container of photos) {
           if (selection.shouldStop) break;
 
-          const key = photo.getAttribute('data-media-key') ||
-                      photo.getAttribute('data-latest-bg') ||
-                      photo.getBoundingClientRect().top + '-' + photo.getBoundingClientRect().left;
+          // Generate unique key from checkbox aria-label or position
+          const checkbox = getCheckbox(container);
+          const photoEl = container.querySelector('[data-latest-bg]');
+          const key = checkbox?.getAttribute('aria-label') ||
+                      photoEl?.getAttribute('data-latest-bg') ||
+                      container.getBoundingClientRect().top + '-' + container.getBoundingClientRect().left;
 
           if (processedElements.has(key)) continue;
           processedElements.add(key);
           foundNew = true;
 
-          if (!matchesFilters(photo)) continue;
-          if (isSelected(photo)) continue;
+          if (!matchesFilters(container)) continue;
+          if (isSelected(container)) continue;
 
           try {
-            const selected = selectPhoto(photo);
+            const selected = selectPhoto(container);
             if (selected) {
               selection.count++;
               updateProgressCount(selection.count);
