@@ -57,7 +57,11 @@
   const selection = {
     isRunning: false,
     count: 0,
-    shouldStop: false
+    shouldStop: false,
+    phase: 'idle',              // 'idle' | 'scanning' | 'selecting' | 'complete'
+    currentDateViewing: null,   // Date object of oldest photo seen in current batch
+    startTime: null,            // Timestamp for timeout tracking
+    isPaused: false             // For timeout prompt
   };
 
   function getStyles() {
