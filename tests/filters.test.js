@@ -1,6 +1,9 @@
 const {
   parseDate,
   isDateInRange,
+  isBeforeFromDate,
+  isAfterToDate,
+  formatDateForDisplay,
   getFileType,
   getOrientationFromDimensions,
   matchesFilters
@@ -112,6 +115,83 @@ describe('isDateInRange', () => {
   test('returns true when no range specified', () => {
     const date = new Date('2026-02-23T12:00:00');
     expect(isDateInRange(date, null, null)).toBe(true);
+  });
+});
+
+describe('isBeforeFromDate', () => {
+  test('returns true when photo date is before from date', () => {
+    const photoDate = new Date('2026-01-15T12:00:00');
+    expect(isBeforeFromDate(photoDate, '2026-02-01')).toBe(true);
+  });
+
+  test('returns false when photo date equals from date', () => {
+    const photoDate = new Date('2026-02-01T12:00:00');
+    expect(isBeforeFromDate(photoDate, '2026-02-01')).toBe(false);
+  });
+
+  test('returns false when photo date is after from date', () => {
+    const photoDate = new Date('2026-02-15T12:00:00');
+    expect(isBeforeFromDate(photoDate, '2026-02-01')).toBe(false);
+  });
+
+  test('returns false when fromDate is null', () => {
+    const photoDate = new Date('2026-01-15T12:00:00');
+    expect(isBeforeFromDate(photoDate, null)).toBe(false);
+  });
+
+  test('returns false when photoDate is null', () => {
+    expect(isBeforeFromDate(null, '2026-02-01')).toBe(false);
+  });
+
+  test('returns false when photoDate is invalid', () => {
+    expect(isBeforeFromDate(new Date('invalid'), '2026-02-01')).toBe(false);
+  });
+});
+
+describe('isAfterToDate', () => {
+  test('returns true when photo date is after to date', () => {
+    const photoDate = new Date('2026-02-15T12:00:00');
+    expect(isAfterToDate(photoDate, '2026-02-01')).toBe(true);
+  });
+
+  test('returns false when photo date equals to date', () => {
+    const photoDate = new Date('2026-02-01T12:00:00');
+    expect(isAfterToDate(photoDate, '2026-02-01')).toBe(false);
+  });
+
+  test('returns false when photo date is before to date', () => {
+    const photoDate = new Date('2026-01-15T12:00:00');
+    expect(isAfterToDate(photoDate, '2026-02-01')).toBe(false);
+  });
+
+  test('returns false when toDate is null', () => {
+    const photoDate = new Date('2026-02-15T12:00:00');
+    expect(isAfterToDate(photoDate, null)).toBe(false);
+  });
+
+  test('returns false when photoDate is null', () => {
+    expect(isAfterToDate(null, '2026-02-01')).toBe(false);
+  });
+});
+
+describe('formatDateForDisplay', () => {
+  test('formats date as "Mon YYYY"', () => {
+    // Use explicit time to avoid timezone issues
+    expect(formatDateForDisplay(new Date('2026-02-15T12:00:00'))).toBe('Feb 2026');
+    expect(formatDateForDisplay(new Date('2024-12-25T12:00:00'))).toBe('Dec 2024');
+    expect(formatDateForDisplay(new Date('2023-01-15T12:00:00'))).toBe('Jan 2023');
+  });
+
+  test('returns "Unknown" for null date', () => {
+    expect(formatDateForDisplay(null)).toBe('Unknown');
+  });
+
+  test('returns "Unknown" for invalid date', () => {
+    expect(formatDateForDisplay(new Date('invalid'))).toBe('Unknown');
+  });
+
+  test('returns "Unknown" for undefined', () => {
+    expect(formatDateForDisplay(undefined)).toBe('Unknown');
   });
 });
 

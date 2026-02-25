@@ -88,6 +88,54 @@ function parseISODateString(dateString) {
 }
 
 /**
+ * Check if a date is before the target "from" date (scrolled past target range)
+ * Used for infinite scroll to know when to stop
+ * @param {Date} photoDate - The photo's date
+ * @param {string|null} fromDate - The "from" date filter (ISO format)
+ * @returns {boolean} - True if photo is before the from date
+ */
+function isBeforeFromDate(photoDate, fromDate) {
+  if (!fromDate) return false; // No from date means can't determine
+  if (!photoDate || !(photoDate instanceof Date) || isNaN(photoDate.getTime())) {
+    return false;
+  }
+
+  const from = parseISODateString(fromDate);
+  return compareDatesOnly(photoDate, from) < 0;
+}
+
+/**
+ * Check if a date is after the target "to" date (haven't reached target range yet)
+ * Used for infinite scroll phase tracking
+ * @param {Date} photoDate - The photo's date
+ * @param {string|null} toDate - The "to" date filter (ISO format)
+ * @returns {boolean} - True if photo is after the to date
+ */
+function isAfterToDate(photoDate, toDate) {
+  if (!toDate) return false; // No to date means can't determine
+  if (!photoDate || !(photoDate instanceof Date) || isNaN(photoDate.getTime())) {
+    return false;
+  }
+
+  const to = parseISODateString(toDate);
+  return compareDatesOnly(photoDate, to) > 0;
+}
+
+/**
+ * Format a date as "Mon YYYY" for display (e.g., "Feb 2024")
+ * @param {Date} date - The date to format
+ * @returns {string} - Formatted string or "Unknown"
+ */
+function formatDateForDisplay(date) {
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+    return 'Unknown';
+  }
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+/**
  * Check if a date falls within a range
  * @param {Date} date - The date to check
  * @param {string|null} fromDate - Start of range (inclusive), ISO format (YYYY-MM-DD)
@@ -205,6 +253,9 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     parseDate,
     isDateInRange,
+    isBeforeFromDate,
+    isAfterToDate,
+    formatDateForDisplay,
     getFileType,
     getOrientationFromDimensions,
     matchesFilters,
@@ -218,6 +269,9 @@ if (typeof window !== 'undefined') {
   window.GPC_Filters = {
     parseDate,
     isDateInRange,
+    isBeforeFromDate,
+    isAfterToDate,
+    formatDateForDisplay,
     getFileType,
     getOrientationFromDimensions,
     matchesFilters,

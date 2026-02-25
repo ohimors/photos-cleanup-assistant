@@ -1151,11 +1151,13 @@
   async function runSelectionLoop() {
     const processedElements = new Set();
     let noNewPhotosCount = 0;
+    let stuckAtBottomCount = 0;
     let errorCount = 0;
     const MAX_NO_NEW = 3;
+    const MAX_STUCK_AT_BOTTOM = 5; // Try 5 times before giving up when stuck
     const MAX_ERRORS = 5;
     const CLICK_DELAY = 75;
-    const SCROLL_DELAY = 400;
+    const SCROLL_DELAY = 800; // Increased from 400ms for infinite scroll loading
     const TIMEOUT_MS = 180000; // 3 minutes
 
     while (!selection.shouldStop) {
@@ -1256,24 +1258,48 @@
           break;
         }
 
-        // Only use noNewPhotos stop condition if no "from" date is set
+        // Track scroll position before scrolling
+        const scrollPosBefore = window.scrollY;
+        const docHeightBefore = document.documentElement.scrollHeight;
+
+        // Scroll down
+        scrollDown();
+        await wait(SCROLL_DELAY);
+
+        // Check if we made progress (scroll position changed or doc height increased)
+        const scrollPosAfter = window.scrollY;
+        const docHeightAfter = document.documentElement.scrollHeight;
+        const madeProgress = scrollPosAfter > scrollPosBefore || docHeightAfter > docHeightBefore;
+
+        // Determine if we should stop
         if (!foundNew) {
           noNewPhotosCount++;
-          // If we have a "from" date, keep scrolling unless at bottom
-          if (!filters.dateRange.from) {
+
+          // If we have a "from" date, we need to keep scrolling until we reach it
+          if (filters.dateRange.from) {
+            // Only stop if we're truly stuck (no scroll progress after multiple attempts)
+            if (!madeProgress) {
+              stuckAtBottomCount++;
+              console.log(`Google Photos Cleaner: Stuck at bottom, attempt ${stuckAtBottomCount}/${MAX_STUCK_AT_BOTTOM}`);
+              if (stuckAtBottomCount >= MAX_STUCK_AT_BOTTOM) {
+                console.log('Google Photos Cleaner: Reached end of library');
+                break;
+              }
+              // Try scrolling again after a longer wait
+              await wait(500);
+            } else {
+              stuckAtBottomCount = 0; // Reset if we made progress
+            }
+          } else {
+            // No "from" date - use original logic
             if (noNewPhotosCount >= MAX_NO_NEW || isAtBottom()) {
               break;
             }
-          } else if (isAtBottom()) {
-            // With "from" date, only stop at actual bottom
-            break;
           }
         } else {
           noNewPhotosCount = 0;
+          stuckAtBottomCount = 0;
         }
-
-        scrollDown();
-        await wait(SCROLL_DELAY);
 
       } catch (error) {
         console.error('Selection loop error:', error);
