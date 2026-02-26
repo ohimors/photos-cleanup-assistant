@@ -554,6 +554,58 @@
     return findPhotoContainers();
   }
 
+  // Check if visible photo containers have their metadata loaded (aria-labels present)
+  function countContainersWithMetadata() {
+    const containers = document.querySelectorAll(SELECTORS.photoContainer);
+    let withMetadata = 0;
+    let visible = 0;
+
+    for (const container of containers) {
+      const rect = container.getBoundingClientRect();
+      const isVisible = rect.width > 0 && rect.height > 0 &&
+                        rect.top < window.innerHeight && rect.bottom > 0;
+      if (!isVisible) continue;
+
+      visible++;
+      const checkbox = container.querySelector(SELECTORS.photoCheckbox);
+      if (checkbox && checkbox.getAttribute('aria-label')) {
+        withMetadata++;
+      }
+    }
+
+    return { visible, withMetadata };
+  }
+
+  // Wait for photo metadata to load after scrolling
+  // Returns when most visible photos have their aria-labels, or after timeout
+  async function waitForMetadataLoaded(minRatio = 0.8, maxWaitMs = 2000, pollIntervalMs = 100) {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+      const { visible, withMetadata } = countContainersWithMetadata();
+
+      // If we have enough photos with metadata, we're good
+      if (visible > 0 && withMetadata / visible >= minRatio) {
+        console.log(`Google Photos Cleaner: Metadata loaded (${withMetadata}/${visible} photos ready)`);
+        return true;
+      }
+
+      // If no visible containers at all, wait a bit for DOM to update
+      if (visible === 0) {
+        await wait(pollIntervalMs);
+        continue;
+      }
+
+      console.log(`Google Photos Cleaner: Waiting for metadata (${withMetadata}/${visible} ready)...`);
+      await wait(pollIntervalMs);
+    }
+
+    // Timeout reached, proceed anyway
+    const { visible, withMetadata } = countContainersWithMetadata();
+    console.log(`Google Photos Cleaner: Metadata wait timeout (${withMetadata}/${visible} ready), proceeding`);
+    return false;
+  }
+
   // Compare two dates by year, month, day only (ignoring time/timezone)
   function compareDatesOnly(date1, date2) {
     const y1 = date1.getFullYear(), m1 = date1.getMonth(), d1 = date1.getDate();
@@ -1225,8 +1277,8 @@
     const MAX_NO_NEW = 3;
     const MAX_STUCK_AT_BOTTOM = 5; // Try 5 times before giving up when stuck
     const MAX_ERRORS = 5;
-    const CLICK_DELAY = 17;
-    const SCROLL_DELAY = 200; // Fast scanning
+    const CLICK_DELAY = 50; // Fast clicking
+    const MIN_SCROLL_SETTLE = 150; // Minimum wait for scroll animation
     const TIMEOUT_MS = 360000; // 6 minutes
 
     while (!selection.shouldStop) {
@@ -1332,7 +1384,8 @@
 
         // Scroll down
         scrollDown();
-        await wait(SCROLL_DELAY);
+        await wait(MIN_SCROLL_SETTLE); // Let scroll animation start
+        await waitForMetadataLoaded(); // Wait for photos to load their metadata
 
         // Check if we made progress (scroll position changed or content height increased)
         const posAfter = getScrollPosition();
