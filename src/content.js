@@ -700,12 +700,66 @@
   }
 
   // Scroll helpers
+  // Google Photos uses a custom scrollable container, not window scroll
+  function getScrollContainer() {
+    // Try multiple selectors to find the scrollable container
+    // Google Photos main content area - look for the element that actually scrolls
+    const selectors = [
+      '[role="main"]',                    // Main content area
+      '.yDSiEe',                          // Google's common scroller class
+      '[jsname="Zppfte"]',                // Photos grid container
+      'div[data-routing-target]',         // Main routing container
+    ];
+
+    for (const selector of selectors) {
+      const el = document.querySelector(selector);
+      if (el && (el.scrollHeight > el.clientHeight || el.scrollTop > 0)) {
+        return el;
+      }
+    }
+
+    // Fallback: find any element that is scrollable and contains photos
+    const photoContainer = document.querySelector(SELECTORS.photoContainer);
+    if (photoContainer) {
+      let parent = photoContainer.parentElement;
+      while (parent && parent !== document.body) {
+        const style = window.getComputedStyle(parent);
+        const isScrollable = style.overflowY === 'auto' || style.overflowY === 'scroll';
+        const canScroll = parent.scrollHeight > parent.clientHeight;
+        if (isScrollable && canScroll) {
+          return parent;
+        }
+        parent = parent.parentElement;
+      }
+    }
+
+    // Last resort: use document.documentElement or body
+    return document.documentElement.scrollHeight > window.innerHeight
+      ? document.documentElement
+      : document.body;
+  }
+
   function scrollToTop() {
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    const container = getScrollContainer();
+    if (container === document.documentElement || container === document.body) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    } else {
+      container.scrollTop = 0;
+    }
   }
 
   function scrollDown() {
-    window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
+    const container = getScrollContainer();
+    const scrollAmount = window.innerHeight * 0.8;
+
+    if (container === document.documentElement || container === document.body) {
+      window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+    } else {
+      container.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+    }
+
+    console.log('Google Photos Cleaner: Scrolling container:', container.className || container.tagName,
+      'scrollTop:', container.scrollTop, 'scrollHeight:', container.scrollHeight);
   }
 
   function wait(ms) {
@@ -713,7 +767,22 @@
   }
 
   function isAtBottom() {
-    return (window.scrollY + window.innerHeight) >= (document.documentElement.scrollHeight - 100);
+    const container = getScrollContainer();
+
+    if (container === document.documentElement || container === document.body) {
+      return (window.scrollY + window.innerHeight) >= (document.documentElement.scrollHeight - 100);
+    }
+
+    // For custom container
+    return (container.scrollTop + container.clientHeight) >= (container.scrollHeight - 100);
+  }
+
+  function getScrollPosition() {
+    const container = getScrollContainer();
+    if (container === document.documentElement || container === document.body) {
+      return { scrollTop: window.scrollY, scrollHeight: document.documentElement.scrollHeight };
+    }
+    return { scrollTop: container.scrollTop, scrollHeight: container.scrollHeight };
   }
 
   // Inject trigger button into Google Photos sidebar navigation
@@ -1259,17 +1328,20 @@
         }
 
         // Track scroll position before scrolling
-        const scrollPosBefore = window.scrollY;
-        const docHeightBefore = document.documentElement.scrollHeight;
+        const posBefore = getScrollPosition();
 
         // Scroll down
         scrollDown();
         await wait(SCROLL_DELAY);
 
-        // Check if we made progress (scroll position changed or doc height increased)
-        const scrollPosAfter = window.scrollY;
-        const docHeightAfter = document.documentElement.scrollHeight;
-        const madeProgress = scrollPosAfter > scrollPosBefore || docHeightAfter > docHeightBefore;
+        // Check if we made progress (scroll position changed or content height increased)
+        const posAfter = getScrollPosition();
+        const madeProgress = posAfter.scrollTop > posBefore.scrollTop || posAfter.scrollHeight > posBefore.scrollHeight;
+
+        console.log('Google Photos Cleaner: Scroll progress -',
+          'before:', posBefore.scrollTop, '/', posBefore.scrollHeight,
+          'after:', posAfter.scrollTop, '/', posAfter.scrollHeight,
+          'progress:', madeProgress);
 
         // Determine if we should stop
         if (!foundNew) {
