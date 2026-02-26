@@ -1225,9 +1225,9 @@
     const MAX_NO_NEW = 3;
     const MAX_STUCK_AT_BOTTOM = 5; // Try 5 times before giving up when stuck
     const MAX_ERRORS = 5;
-    const CLICK_DELAY = 35;
-    const SCROLL_DELAY = 400; // Fast scanning
-    const TIMEOUT_MS = 180000; // 3 minutes
+    const CLICK_DELAY = 17;
+    const SCROLL_DELAY = 200; // Fast scanning
+    const TIMEOUT_MS = 360000; // 6 minutes
 
     while (!selection.shouldStop) {
       // Check for timeout (3 minutes)
@@ -1358,7 +1358,7 @@
                 break;
               }
               // Try scrolling again after a short wait
-              await wait(250);
+              await wait(125);
             } else {
               stuckAtBottomCount = 0; // Reset if we made progress
             }
