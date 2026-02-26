@@ -1225,8 +1225,8 @@
     const MAX_NO_NEW = 3;
     const MAX_STUCK_AT_BOTTOM = 5; // Try 5 times before giving up when stuck
     const MAX_ERRORS = 5;
-    const CLICK_DELAY = 75;
-    const SCROLL_DELAY = 800; // Increased from 400ms for infinite scroll loading
+    const CLICK_DELAY = 35;
+    const SCROLL_DELAY = 400; // Fast scanning
     const TIMEOUT_MS = 180000; // 3 minutes
 
     while (!selection.shouldStop) {
@@ -1357,8 +1357,8 @@
                 console.log('Google Photos Cleaner: Reached end of library');
                 break;
               }
-              // Try scrolling again after a longer wait
-              await wait(500);
+              // Try scrolling again after a short wait
+              await wait(250);
             } else {
               stuckAtBottomCount = 0; // Reset if we made progress
             }
