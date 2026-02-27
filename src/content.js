@@ -512,13 +512,28 @@
     }
 
     // Extract date - format is "Feb 25, 2026, 8:46:07 AM" at the end
-    // Try to match date pattern after the orientation
-    const dateMatch = ariaLabel.match(/(\w{3}\s+\d{1,2},\s+\d{4})/);
-    if (dateMatch) {
-      const parsed = Date.parse(dateMatch[1]);
-      if (!isNaN(parsed)) {
-        result.date = new Date(parsed);
+    // Try multiple patterns to handle different formats
+    const datePatterns = [
+      /(\w{3}\s+\d{1,2},\s+\d{4})/,           // "Feb 25, 2026"
+      /(\d{1,2}\/\d{1,2}\/\d{2,4})/,           // "2/25/2026" or "02/25/26"
+      /(\d{4}-\d{2}-\d{2})/,                   // "2026-02-25"
+      /(\w+\s+\d{1,2},?\s+\d{4})/,             // "February 25 2026" or "February 25, 2026"
+    ];
+
+    for (const pattern of datePatterns) {
+      const dateMatch = ariaLabel.match(pattern);
+      if (dateMatch) {
+        const parsed = Date.parse(dateMatch[1]);
+        if (!isNaN(parsed)) {
+          result.date = new Date(parsed);
+          break;
+        }
       }
+    }
+
+    // Log if we couldn't extract date from a non-empty aria-label
+    if (!result.date && ariaLabel.length > 0) {
+      console.log('Google Photos Cleaner: Could not parse date from aria-label:', ariaLabel);
     }
 
     return result;
@@ -539,8 +554,30 @@
   }
 
   // Get checkbox from a photo container
+  // Only returns individual photo checkboxes, not date group selectors
   function getCheckbox(container) {
-    return container.querySelector(SELECTORS.photoCheckbox);
+    const checkbox = container.querySelector(SELECTORS.photoCheckbox);
+    if (!checkbox) return null;
+
+    // Filter out date group selectors by checking aria-label
+    // Individual photo checkboxes start with "Photo" or "Video"
+    // Date group selectors have "Select" or "Select all photos from..."
+    const ariaLabel = checkbox.getAttribute('aria-label');
+    if (!ariaLabel) return null;
+
+    const lowerLabel = ariaLabel.toLowerCase();
+
+    // Must start with "photo" or "video" to be an individual photo checkbox
+    if (lowerLabel.startsWith('photo') || lowerLabel.startsWith('video')) {
+      return checkbox;
+    }
+
+    // Log unexpected aria-label patterns for debugging
+    if (ariaLabel !== 'Select' && !ariaLabel.startsWith('Select all')) {
+      console.log('Google Photos Cleaner: Unexpected checkbox aria-label:', ariaLabel);
+    }
+
+    return null;
   }
 
   // Get photo metadata from checkbox aria-label
@@ -1009,23 +1046,53 @@
     return checkbox.getAttribute('aria-checked') === 'true';
   }
 
-  // Select a photo by clicking its checkbox
-  function selectPhoto(container) {
-    // Trigger mouseenter to ensure checkbox is interactive
-    container.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-    container.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  // Select a photo by clicking its checkbox with retry logic
+  async function selectPhoto(container, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // Trigger mouseenter to ensure checkbox is visible and interactive
+      // Google Photos only shows checkboxes on hover
+      container.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      container.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
 
-    const checkbox = getCheckbox(container);
+      // Wait for checkbox to become interactive (increased from 30ms)
+      await wait(80);
 
-    if (checkbox) {
-      // Click the checkbox directly
+      const checkbox = getCheckbox(container);
+
+      if (!checkbox) {
+        console.warn('Google Photos Cleaner: Could not find checkbox for photo container');
+        if (attempt < maxRetries) {
+          await wait(100);
+          continue;
+        }
+        return false;
+      }
+
+      // Skip if already selected
+      if (checkbox.getAttribute('aria-checked') === 'true') {
+        return true;
+      }
+
+      // Click the checkbox
       checkbox.click();
-      console.log('Google Photos Cleaner: Clicked checkbox for photo');
-      return true;
+
+      // Wait and verify selection took effect (increased from 50ms)
+      await wait(100);
+
+      // Check if selection succeeded
+      if (checkbox.getAttribute('aria-checked') === 'true') {
+        if (attempt > 1) {
+          console.log('Google Photos Cleaner: Selected photo (attempt ' + attempt + ')');
+        }
+        return true;
+      }
+
+      // Selection didn't take, retry with longer wait
+      console.log('Google Photos Cleaner: Selection attempt ' + attempt + ' failed, retrying...');
+      await wait(100);
     }
 
-    // No checkbox found
-    console.warn('Google Photos Cleaner: Could not find checkbox for photo container');
+    console.warn('Google Photos Cleaner: Failed to select photo after ' + maxRetries + ' attempts');
     return false;
   }
 
@@ -1849,12 +1916,13 @@
     const MAX_NO_NEW = 3;
     const MAX_STUCK_AT_BOTTOM = 5; // Try 5 times before giving up when stuck
     const MAX_ERRORS = 5;
-    const CLICK_DELAY = 50; // Fast clicking
-    const MIN_SCROLL_SETTLE = 150; // Minimum wait for scroll animation
+    const CLICK_DELAY = 100; // Delay between photo selections
+    const MIN_SCROLL_SETTLE = 300; // Wait for scroll animation and lazy loading
     const TIMEOUT_MS = 360000; // 6 minutes
+    const MAX_VIEWPORT_RETRIES = 3; // Max retries for unprocessed photos in viewport
 
     while (!selection.shouldStop) {
-      // Check for timeout (3 minutes)
+      // Check for timeout (6 minutes)
       if (Date.now() - selection.startTime > TIMEOUT_MS) {
         showTimeoutPrompt();
         // Wait for user decision
@@ -1865,77 +1933,125 @@
       }
 
       try {
-        const photos = findPhotoContainers();
-
-        // Check if we can find any photos
-        if (photos.length === 0 && processedElements.size === 0) {
-          errorCount++;
-          if (errorCount >= MAX_ERRORS) {
-            showErrorToast('Unable to find photos. Google may have updated their UI.');
-            break;
-          }
-          await wait(1000);
-          continue;
-        }
-
-        errorCount = 0;
+        // Process current viewport with retries for photos missing metadata
+        let viewportRetries = 0;
         let foundNew = false;
         let oldestDateInBatch = null;
         let passedTargetRange = false;
+        let skippedDueToNoMetadata = 0;
 
-        for (const container of photos) {
-          if (selection.shouldStop) break;
+        while (viewportRetries < MAX_VIEWPORT_RETRIES) {
+          const photos = findPhotoContainers();
 
-          // Generate unique key
-          const checkbox = getCheckbox(container);
-          const photoEl = container.querySelector('[data-latest-bg]');
-          const key = checkbox?.getAttribute('aria-label') ||
-                      photoEl?.getAttribute('data-latest-bg') ||
-                      container.getBoundingClientRect().top + '-' + container.getBoundingClientRect().left;
-
-          if (processedElements.has(key)) continue;
-          processedElements.add(key);
-          foundNew = true;
-
-          // Track oldest date seen
-          const metadata = getPhotoMetadata(container);
-          if (metadata && metadata.date) {
-            if (!oldestDateInBatch || compareDatesOnly(metadata.date, oldestDateInBatch) < 0) {
-              oldestDateInBatch = metadata.date;
+          // Check if we can find any photos
+          if (photos.length === 0 && processedElements.size === 0) {
+            errorCount++;
+            if (errorCount >= MAX_ERRORS) {
+              showErrorToast('Unable to find photos. Google may have updated their UI.');
+              return;
             }
-          }
-
-          // Check if we've scrolled past the target range
-          if (isBeforeTargetRange(container)) {
-            passedTargetRange = true;
-            console.log('Google Photos Cleaner: Passed target date range, stopping');
+            await wait(1000);
             break;
           }
 
-          // Check if photo is within target range (for phase tracking)
-          if (isWithinTargetRange(container)) {
-            if (selection.phase === 'scanning') {
-              selection.phase = 'selecting';
-              updateProgressLabel('Selecting...');
-              updateProgressStatus('');
+          errorCount = 0;
+          skippedDueToNoMetadata = 0;
+
+          for (const container of photos) {
+            if (selection.shouldStop) break;
+
+            // Generate unique key - MUST be content-based, not position-based
+            // Google Photos virtualizes the list and recycles DOM elements at same positions
+            const checkbox = getCheckbox(container);
+            const photoEl = container.querySelector('[data-latest-bg]');
+            const ariaLabel = checkbox?.getAttribute('aria-label');
+            const bgUrl = photoEl?.getAttribute('data-latest-bg');
+
+            // Require a stable content-based key - track if metadata not loaded yet
+            if (!ariaLabel && !bgUrl) {
+              skippedDueToNoMetadata++;
+              continue;
             }
+
+            // Use background URL as primary key (unique per photo), aria-label as fallback
+            const key = bgUrl || ariaLabel;
+
+            if (processedElements.has(key)) continue;
+            processedElements.add(key);
+            foundNew = true;
+
+            // Track oldest date seen
+            const metadata = getPhotoMetadata(container);
+            if (metadata && metadata.date) {
+              if (!oldestDateInBatch || compareDatesOnly(metadata.date, oldestDateInBatch) < 0) {
+                oldestDateInBatch = metadata.date;
+              }
+            }
+
+            // Check if we've scrolled past the target range
+            if (isBeforeTargetRange(container)) {
+              passedTargetRange = true;
+              console.log('Google Photos Cleaner: Passed target date range, stopping');
+              break;
+            }
+
+            // Check if photo is within target range (for phase tracking)
+            if (isWithinTargetRange(container)) {
+              if (selection.phase === 'scanning') {
+                selection.phase = 'selecting';
+                updateProgressLabel('Selecting...');
+                updateProgressStatus('');
+              }
+            }
+
+            // Try to select if it matches all filters
+            const shouldSelect = matchesFilters(container);
+            const alreadySelected = isSelected(container);
+
+            if (!shouldSelect) {
+              console.log('Google Photos Cleaner: Photo does not match filters, skipping');
+              continue;
+            }
+
+            if (alreadySelected) {
+              console.log('Google Photos Cleaner: Photo already selected, skipping');
+              continue;
+            }
+
+            // This photo matches filters and is not selected - try to select it
+            try {
+              const selected = await selectPhoto(container);
+              if (selected) {
+                selection.count++;
+                updateProgressCount(selection.count);
+                console.log(`Google Photos Cleaner: Selected photo #${selection.count}`);
+              } else {
+                // Selection failed - log details for debugging
+                const metadata = getPhotoMetadata(container);
+                console.warn('Google Photos Cleaner: FAILED to select photo that should be selected!',
+                  'Date:', metadata?.date?.toDateString(),
+                  'Key:', key.substring(0, 50) + '...');
+              }
+            } catch (e) {
+              console.warn('Failed to select photo:', e);
+            }
+
+            await wait(CLICK_DELAY);
           }
 
-          // Try to select if it matches all filters
-          if (!matchesFilters(container)) continue;
-          if (isSelected(container)) continue;
-
-          try {
-            const selected = selectPhoto(container);
-            if (selected) {
-              selection.count++;
-              updateProgressCount(selection.count);
-            }
-          } catch (e) {
-            console.warn('Failed to select photo:', e);
+          // If we skipped photos due to missing metadata, wait and retry
+          if (skippedDueToNoMetadata > 0 && viewportRetries < MAX_VIEWPORT_RETRIES - 1) {
+            console.log(`Google Photos Cleaner: ${skippedDueToNoMetadata} photos without metadata, waiting and retrying (attempt ${viewportRetries + 1})`);
+            await wait(500);
+            await waitForMetadataLoaded(0.9, 2000, 100);
+            viewportRetries++;
+          } else {
+            break; // All photos processed or max retries reached
           }
+        }
 
-          await wait(CLICK_DELAY);
+        if (skippedDueToNoMetadata > 0) {
+          console.log(`Google Photos Cleaner: Still ${skippedDueToNoMetadata} photos without metadata after retries, proceeding`);
         }
 
         // Update current viewing date for UI
