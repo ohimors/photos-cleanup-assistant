@@ -841,6 +841,62 @@
     return { scrollTop: container.scrollTop, scrollHeight: container.scrollHeight };
   }
 
+  // Find the date scrubber element (timeline on right side)
+  function findDateScrubber() {
+    return document.querySelector(SELECTORS.dateScrubber);
+  }
+
+  // Find a year element in the date scrubber
+  // Returns exact match if found, otherwise returns nearest year element
+  function findYearInScrubber(scrubber, targetYear) {
+    const yearElements = scrubber.querySelectorAll(SELECTORS.yearLabel);
+    let nearestElement = null;
+    let nearestDiff = Infinity;
+
+    for (const element of yearElements) {
+      const yearText = parseInt(element.textContent, 10);
+      if (isNaN(yearText)) continue;
+
+      // Exact match
+      if (yearText === targetYear) {
+        return element;
+      }
+
+      // Track nearest
+      const diff = Math.abs(yearText - targetYear);
+      if (diff < nearestDiff) {
+        nearestDiff = diff;
+        nearestElement = element;
+      }
+    }
+
+    return nearestElement;
+  }
+
+  // Jump to a specific year using the date scrubber
+  async function jumpToYear(targetYear) {
+    console.log(`Google Photos Cleaner: Attempting to jump to year ${targetYear}`);
+
+    const scrubber = findDateScrubber();
+    if (!scrubber) {
+      console.log('Google Photos Cleaner: Date scrubber not found');
+      return false;
+    }
+
+    const yearElement = findYearInScrubber(scrubber, targetYear);
+    if (!yearElement) {
+      console.log('Google Photos Cleaner: No year element found in scrubber');
+      return false;
+    }
+
+    yearElement.click();
+    await wait(500);
+    await waitForMetadataLoaded();
+
+    console.log(`Google Photos Cleaner: Successfully jumped to year ${targetYear}`);
+    return true;
+  }
+
   // Inject trigger button into Google Photos sidebar navigation
   function injectTriggerButton() {
     // Check if button already exists
