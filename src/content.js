@@ -707,6 +707,280 @@
     return compareDatesOnly(metadata.date, fromDate) < 0;
   }
 
+  // Check if a photo's date is after the "to" date (need to scroll up more to reach range)
+  function isAfterTargetRange(container) {
+    if (!filters.dateRange.to) return false; // No to date, can't determine
+
+    const metadata = getPhotoMetadata(container);
+    if (!metadata || !metadata.date) return false;
+
+    const toDate = parseISODateString(filters.dateRange.to);
+    return compareDatesOnly(metadata.date, toDate) > 0;
+  }
+
+  // Get the oldest (earliest) date visible on screen
+  function getOldestVisibleDate() {
+    const containers = findPhotoContainers();
+    let oldestDate = null;
+
+    for (const container of containers) {
+      const metadata = getPhotoMetadata(container);
+      if (metadata && metadata.date) {
+        if (!oldestDate || compareDatesOnly(metadata.date, oldestDate) < 0) {
+          oldestDate = metadata.date;
+        }
+      }
+    }
+
+    return oldestDate;
+  }
+
+  // Get the newest (most recent) date visible on screen
+  function getNewestVisibleDate() {
+    const containers = findPhotoContainers();
+    let newestDate = null;
+
+    for (const container of containers) {
+      const metadata = getPhotoMetadata(container);
+      if (metadata && metadata.date) {
+        if (!newestDate || compareDatesOnly(metadata.date, newestDate) > 0) {
+          newestDate = metadata.date;
+        }
+      }
+    }
+
+    return newestDate;
+  }
+
+  // Scroll to bottom of the photo library
+  async function scrollToBottom() {
+    const container = getScrollContainer();
+    let lastScrollHeight = 0;
+    let stuckCount = 0;
+
+    while (stuckCount < 3) {
+      if (container === document.documentElement || container === document.body) {
+        window.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
+      } else {
+        container.scrollTop = container.scrollHeight;
+      }
+
+      await wait(300);
+      await waitForMetadataLoaded(0.5, 1000, 100);
+
+      const currentScrollHeight = container.scrollHeight;
+      if (currentScrollHeight === lastScrollHeight) {
+        stuckCount++;
+      } else {
+        stuckCount = 0;
+        lastScrollHeight = currentScrollHeight;
+      }
+    }
+
+    console.log('Google Photos Cleaner: Reached bottom, scroll height:', container.scrollHeight);
+  }
+
+  // Jump to a specific scroll position (0 to 1 = top to bottom)
+  function jumpToScrollPercent(percent) {
+    const container = getScrollContainer();
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    const targetScroll = Math.floor(maxScroll * percent);
+
+    if (container === document.documentElement || container === document.body) {
+      window.scrollTo({ top: targetScroll, behavior: 'instant' });
+    } else {
+      container.scrollTop = targetScroll;
+    }
+
+    console.log(`Google Photos Cleaner: Jumped to ${(percent * 100).toFixed(1)}% (scroll: ${targetScroll})`);
+  }
+
+  // Get current scroll position as a percentage (0 to 1)
+  function getScrollPercent() {
+    const container = getScrollContainer();
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    if (maxScroll <= 0) return 0;
+
+    const currentScroll = container === document.documentElement || container === document.body
+      ? window.scrollY
+      : container.scrollTop;
+
+    return currentScroll / maxScroll;
+  }
+
+  // Binary search to find the scroll position for a target date
+  // Returns true if found a good position, false if target date not in library
+  async function binarySearchToDate(targetDate, statusCallback) {
+    console.log(`Google Photos Cleaner: Binary search for date ${targetDate.toDateString()}`);
+
+    const container = getScrollContainer();
+
+    // Step 1: Check top (newest photos)
+    scrollToTop();
+    await wait(500);
+    await waitForMetadataLoaded(0.8, 2000, 100);
+
+    const topDate = getNewestVisibleDate();
+    if (!topDate) {
+      console.log('Google Photos Cleaner: No photos found at top');
+      return false;
+    }
+
+    console.log(`Google Photos Cleaner: Top date: ${topDate.toDateString()}`);
+
+    // If target is newer than newest photo, start from top
+    if (compareDatesOnly(targetDate, topDate) >= 0) {
+      console.log('Google Photos Cleaner: Target date is at or after newest, starting from top');
+      return true;
+    }
+
+    // Step 2: Scroll to bottom to establish bounds
+    if (statusCallback) statusCallback('Finding library bounds...');
+    await scrollToBottom();
+
+    const bottomDate = getOldestVisibleDate();
+    if (!bottomDate) {
+      console.log('Google Photos Cleaner: No photos found at bottom');
+      scrollToTop();
+      return false;
+    }
+
+    console.log(`Google Photos Cleaner: Bottom date: ${bottomDate.toDateString()}`);
+
+    // If target is older than oldest photo, start from bottom
+    if (compareDatesOnly(targetDate, bottomDate) <= 0) {
+      console.log('Google Photos Cleaner: Target date is at or before oldest, starting from bottom');
+      return true;
+    }
+
+    // Step 3: Binary search
+    let low = 0;    // Top (newest)
+    let high = 1;   // Bottom (oldest)
+    let iterations = 0;
+    const maxIterations = 20;
+
+    while (iterations < maxIterations && (high - low) > 0.01) {
+      iterations++;
+      const mid = (low + high) / 2;
+
+      if (statusCallback) statusCallback(`Searching... (step ${iterations})`);
+
+      jumpToScrollPercent(mid);
+      await wait(300);
+      await waitForMetadataLoaded(0.8, 2000, 100);
+
+      const oldestVisible = getOldestVisibleDate();
+      const newestVisible = getNewestVisibleDate();
+
+      if (!oldestVisible || !newestVisible) {
+        console.log(`Google Photos Cleaner: No dates at ${(mid * 100).toFixed(1)}%, trying again`);
+        await wait(500);
+        continue;
+      }
+
+      console.log(`Google Photos Cleaner: At ${(mid * 100).toFixed(1)}%: ${newestVisible.toDateString()} to ${oldestVisible.toDateString()}`);
+
+      // Check if target is in current view
+      if (compareDatesOnly(targetDate, oldestVisible) >= 0 &&
+          compareDatesOnly(targetDate, newestVisible) <= 0) {
+        console.log('Google Photos Cleaner: Target date is in current view!');
+        break;
+      }
+
+      // Adjust search range
+      if (compareDatesOnly(targetDate, oldestVisible) < 0) {
+        // Target is older, need to scroll down
+        low = mid;
+      } else {
+        // Target is newer, need to scroll up
+        high = mid;
+      }
+    }
+
+    // Step 4: Fine-tune - scroll up until we see dates >= target
+    if (statusCallback) statusCallback('Fine-tuning position...');
+
+    let finetuneAttempts = 0;
+    while (finetuneAttempts < 10) {
+      const newestVisible = getNewestVisibleDate();
+      if (!newestVisible) break;
+
+      // If newest visible is at or after target, we're in the right spot
+      if (compareDatesOnly(newestVisible, targetDate) >= 0) {
+        console.log('Google Photos Cleaner: Found good starting position');
+        break;
+      }
+
+      // Scroll up a bit
+      scrollUp();
+      await wait(300);
+      await waitForMetadataLoaded(0.8, 1000, 100);
+      finetuneAttempts++;
+    }
+
+    console.log(`Google Photos Cleaner: Binary search complete after ${iterations} iterations`);
+    return true;
+  }
+
+  // Scroll UP until we reach the TO date (since jumping to a year lands at January)
+  // Returns true if we found the TO date area, false if we hit the top without finding it
+  async function scrollUpToToDate() {
+    if (!filters.dateRange.to) return true; // No TO date, nothing to do
+
+    const toDate = parseISODateString(filters.dateRange.to);
+    const maxScrollAttempts = 50; // Safety limit
+    let attempts = 0;
+
+    console.log(`Google Photos Cleaner: Scrolling up to reach TO date: ${filters.dateRange.to}`);
+    updateProgressStatus(`Scrolling to ${formatDateForDisplay(toDate)}...`);
+
+    while (attempts < maxScrollAttempts) {
+      attempts++;
+
+      await waitForMetadataLoaded(0.8, 2000, 100);
+
+      // Check if any visible photo is at or after the TO date
+      const photos = findPhotoContainers();
+      let foundToDateOrLater = false;
+      let oldestDateSeen = null;
+
+      for (const container of photos) {
+        const metadata = getPhotoMetadata(container);
+        if (metadata && metadata.date) {
+          if (!oldestDateSeen || compareDatesOnly(metadata.date, oldestDateSeen) < 0) {
+            oldestDateSeen = metadata.date;
+          }
+          // If this photo is at or after the TO date, we've reached our starting point
+          if (compareDatesOnly(metadata.date, toDate) >= 0) {
+            foundToDateOrLater = true;
+          }
+        }
+      }
+
+      if (foundToDateOrLater) {
+        console.log(`Google Photos Cleaner: Reached TO date area after ${attempts} scroll(s)`);
+        return true;
+      }
+
+      // If we're at the top and haven't found it, the TO date might not exist in library
+      if (isAtTop()) {
+        console.log('Google Photos Cleaner: Reached top of library');
+        return true; // Start from top anyway
+      }
+
+      // Log progress
+      if (oldestDateSeen) {
+        console.log(`Google Photos Cleaner: Currently at ${formatDateForDisplay(oldestDateSeen)}, scrolling up...`);
+      }
+
+      scrollUp();
+      await wait(300); // Let scroll settle
+    }
+
+    console.log('Google Photos Cleaner: Max scroll attempts reached while seeking TO date');
+    return false;
+  }
+
   // Check if a photo's date is within the target range
   function isWithinTargetRange(container) {
     const metadata = getPhotoMetadata(container);
@@ -818,6 +1092,29 @@
       'scrollTop:', container.scrollTop, 'scrollHeight:', container.scrollHeight);
   }
 
+  function scrollUp() {
+    const container = getScrollContainer();
+    const scrollAmount = window.innerHeight * 0.8;
+
+    if (container === document.documentElement || container === document.body) {
+      window.scrollBy({ top: -scrollAmount, behavior: 'smooth' });
+    } else {
+      container.scrollBy({ top: -scrollAmount, behavior: 'smooth' });
+    }
+
+    console.log('Google Photos Cleaner: Scrolling UP, scrollTop:', container.scrollTop);
+  }
+
+  function isAtTop() {
+    const container = getScrollContainer();
+
+    if (container === document.documentElement || container === document.body) {
+      return window.scrollY <= 100;
+    }
+
+    return container.scrollTop <= 100;
+  }
+
   function wait(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -844,6 +1141,148 @@
   // Find the date scrubber element (timeline on right side)
   function findDateScrubber() {
     return document.querySelector(SELECTORS.dateScrubber);
+  }
+
+  // Make the date scrubber visible (it's hidden by default, only shows on hover/scroll)
+  function showDateScrubber(scrubber) {
+    if (!scrubber) return;
+    scrubber.style.opacity = '1';
+    scrubber.style.visibility = 'visible';
+  }
+
+  // Hide the date scrubber (restore default hidden state)
+  function hideDateScrubber(scrubber) {
+    if (!scrubber) return;
+    scrubber.style.opacity = '';
+    scrubber.style.visibility = '';
+  }
+
+  // Store removed scrubber info for restoration
+  let removedScrubber = null;
+  let scrubberParent = null;
+  let scrubberNextSibling = null;
+
+  // Remove scrubber from DOM during scanning
+  function removeScrubberFromDOM(scrubber) {
+    if (!scrubber) {
+      console.log('Google Photos Cleaner: removeScrubberFromDOM - scrubber is null');
+      return;
+    }
+
+    // Store references for restoration
+    scrubberParent = scrubber.parentElement;
+    scrubberNextSibling = scrubber.nextSibling;
+    removedScrubber = scrubber;
+
+    // Remove from DOM
+    scrubber.remove();
+    console.log('Google Photos Cleaner: Scrubber removed from DOM');
+  }
+
+  // Restore scrubber to DOM
+  function restoreScrubberToDOM() {
+    // Stop the scrubber hiding interval if running
+    stopScrubberHider();
+
+    if (!removedScrubber || !scrubberParent) {
+      console.log('Google Photos Cleaner: No scrubber to restore');
+      return;
+    }
+
+    // Re-insert at original position
+    if (scrubberNextSibling) {
+      scrubberParent.insertBefore(removedScrubber, scrubberNextSibling);
+    } else {
+      scrubberParent.appendChild(removedScrubber);
+    }
+
+    console.log('Google Photos Cleaner: Scrubber restored to DOM');
+
+    // Clear references
+    removedScrubber = null;
+    scrubberParent = null;
+    scrubberNextSibling = null;
+  }
+
+  // Interval ID for continuous scrubber hiding
+  let scrubberHiderInterval = null;
+
+  // Continuously remove scrubber during scanning (in case Google recreates it)
+  function startScrubberHider() {
+    if (scrubberHiderInterval) return;
+
+    scrubberHiderInterval = setInterval(() => {
+      const scrubber = findDateScrubber();
+      if (scrubber && scrubber.parentElement) {
+        scrubber.remove();
+        console.log('Google Photos Cleaner: Scrubber removed by hider');
+      }
+    }, 50); // Check more frequently
+
+    console.log('Google Photos Cleaner: Scrubber hider started');
+  }
+
+  // Stop the continuous scrubber hider
+  function stopScrubberHider() {
+    if (scrubberHiderInterval) {
+      clearInterval(scrubberHiderInterval);
+      scrubberHiderInterval = null;
+      console.log('Google Photos Cleaner: Scrubber hider stopped');
+    }
+    // Note: scrubber will be naturally recreated by Google Photos when user interacts with page
+  }
+
+  // Disable pointer events on the scrubber to prevent mouse interference during scanning
+  function disableScrubberInteraction(scrubber) {
+    if (!scrubber) return;
+    scrubber.style.pointerEvents = 'none';
+  }
+
+  // Re-enable pointer events on the scrubber
+  function enableScrubberInteraction(scrubber) {
+    if (!scrubber) return;
+    scrubber.style.pointerEvents = '';
+  }
+
+  // Mouse event blocking to prevent timeline interference during scanning
+  let mouseBlockerActive = false;
+
+  // Handler that blocks mouse events on the right side of the screen (where timeline is)
+  function mouseBlockerHandler(e) {
+    // Block events in the rightmost 150px of the viewport (timeline area)
+    if (e.clientX > window.innerWidth - 150) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }
+
+  // Enable mouse event blocking using capture phase listeners
+  function enableMouseBlocker() {
+    if (mouseBlockerActive) return;
+
+    // Capture phase (true) ensures we intercept before Google's handlers
+    document.addEventListener('mousemove', mouseBlockerHandler, true);
+    document.addEventListener('mouseenter', mouseBlockerHandler, true);
+    document.addEventListener('mouseover', mouseBlockerHandler, true);
+    document.addEventListener('pointerover', mouseBlockerHandler, true);
+    document.addEventListener('pointermove', mouseBlockerHandler, true);
+
+    mouseBlockerActive = true;
+    console.log('Google Photos Cleaner: Mouse blocker enabled');
+  }
+
+  // Disable mouse event blocking
+  function disableMouseBlocker() {
+    if (!mouseBlockerActive) return;
+
+    document.removeEventListener('mousemove', mouseBlockerHandler, true);
+    document.removeEventListener('mouseenter', mouseBlockerHandler, true);
+    document.removeEventListener('mouseover', mouseBlockerHandler, true);
+    document.removeEventListener('pointerover', mouseBlockerHandler, true);
+    document.removeEventListener('pointermove', mouseBlockerHandler, true);
+
+    mouseBlockerActive = false;
+    console.log('Google Photos Cleaner: Mouse blocker disabled');
   }
 
   // Find a year element in the date scrubber
@@ -883,17 +1322,46 @@
       return false;
     }
 
+    // Make scrubber visible (it's hidden by default)
+    showDateScrubber(scrubber);
+    await wait(100); // Brief wait for visibility to take effect
+
     const yearElement = findYearInScrubber(scrubber, targetYear);
     if (!yearElement) {
       console.log('Google Photos Cleaner: No year element found in scrubber');
       return false;
     }
 
-    yearElement.click();
-    await wait(500);
-    await waitForMetadataLoaded();
+    const actualYear = parseInt(yearElement.textContent, 10);
+    console.log(`Google Photos Cleaner: Jumping to year ${actualYear}${actualYear !== targetYear ? ` (nearest to ${targetYear})` : ''}`);
 
-    console.log(`Google Photos Cleaner: Successfully jumped to year ${targetYear}`);
+    // Get the year element's position
+    const rect = yearElement.getBoundingClientRect();
+
+    // Dispatch mousedown on the scrubber with coordinates pointing to the year
+    // Google's jsaction framework uses mousedown (not click) and reads the Y coordinate
+    const event = new MouseEvent('mousedown', {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2
+    });
+    scrubber.dispatchEvent(event);
+
+    await wait(1000); // Wait longer for page to settle after jump
+
+    // Re-find scrubber after jump (DOM may have changed) and remove it from DOM
+    const scrubberAfterJump = findDateScrubber();
+    removeScrubberFromDOM(scrubberAfterJump);
+
+    // Start continuous scrubber hider in case Google recreates it
+    startScrubberHider();
+
+    // Wait longer for metadata after a big jump (up to 5 seconds)
+    await waitForMetadataLoaded(0.8, 5000, 200);
+
+    console.log(`Google Photos Cleaner: Successfully jumped to year ${actualYear}`);
     return true;
   }
 
@@ -1241,6 +1709,12 @@
       console.warn('Could not save filters:', e);
     }
 
+    // Start selection with UI
+    await runSelectionWithUI();
+  }
+
+  // Run the selection process with UI updates
+  async function runSelectionWithUI() {
     // Switch to progress view
     selection.isRunning = true;
     selection.count = 0;
@@ -1250,31 +1724,53 @@
     selection.startTime = Date.now();
     selection.isPaused = false;
 
+    // Ensure modal is open and showing progress
+    if (!state.modal) {
+      await openModal();
+    }
+
     const filterView = state.modal.querySelector('#gpc-filter-view');
     const progressView = state.modal.querySelector('#gpc-progress-view');
     filterView.style.display = 'none';
     progressView.style.display = 'block';
 
     updateProgressCount(0);
-    updateProgressLabel('Scanning...');
+    updateProgressLabel('Preparing...');
     updateProgressStatus('');
 
-    // Jump to target year if "to date" is set, otherwise start from top
-    let jumped = false;
+    // If we have a "to" date, use binary search to jump to it
     if (filters.dateRange.to) {
-      const targetYear = parseISODateString(filters.dateRange.to).getFullYear();
-      updateProgressStatus(`Jumping to ${targetYear}...`);
-      jumped = await jumpToYear(targetYear);
-    }
+      const toDate = parseISODateString(filters.dateRange.to);
+      updateProgressLabel('Searching...');
 
-    if (!jumped) {
-      // Fall back to starting from top
+      const found = await binarySearchToDate(toDate, (status) => {
+        updateProgressStatus(status);
+      });
+
+      if (!found) {
+        console.log('Google Photos Cleaner: Binary search failed, starting from top');
+        scrollToTop();
+        await wait(500);
+      }
+
+      // Check if user cancelled during search
+      if (selection.shouldStop) {
+        selection.isRunning = false;
+        showCompletionState(0);
+        return;
+      }
+    } else {
+      // No "to" date - start from top (newest photos)
       scrollToTop();
-      await wait(500);
+      await wait(1000);
     }
 
     // Wait for photos to be ready
     await waitForMetadataLoaded();
+
+    selection.phase = 'selecting';
+    updateProgressLabel('Selecting...');
+    updateProgressStatus('');
 
     // Run selection loop
     await runSelectionLoop();
@@ -1288,6 +1784,9 @@
   }
 
   function showCompletionState(count) {
+    // Restore scrubber to DOM now that scanning is complete
+    restoreScrubberToDOM();
+
     if (!state.modal) return;
 
     const progressView = state.modal.querySelector('#gpc-progress-view');
