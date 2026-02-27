@@ -483,26 +483,52 @@
   };
 
   // Parse the checkbox aria-label to extract metadata
-  // Format: "Photo - Portrait - Feb 25, 2026, 8:46:07 AM"
-  // Format: "Video - Landscape - Feb 23, 2026, 11:44:02 PM"
+  // Formats:
+  //   "Photo - Portrait - Feb 25, 2026, 8:46:07 AM"
+  //   "Video - Landscape - Feb 23, 2026, 11:44:02 PM"
+  //   "Animation - Photo - Portrait - Oct 7, 2012, 3:00:37 PM"
+  //   "Collage - Photo - Landscape - Oct 7, 2012, 11:00:03 AM"
+  //   "Burst photo - Portrait - Mar 31, 2019, 12:47:24 PM - 2 photos in sequence"
+  //   "Select all photos from Tue, Feb 28, 2012"
   function parseCheckboxLabel(ariaLabel) {
     if (!ariaLabel) return null;
 
     const result = {
-      type: 'photo',      // 'photo' | 'video'
+      type: 'photo',      // 'photo' | 'video' | 'animation' | 'collage' | 'burst' | 'group'
       orientation: 'unknown', // 'portrait' | 'landscape' | 'square' | 'unknown'
       date: null          // Date object
     };
 
-    // Extract type (Photo or Video)
-    if (ariaLabel.toLowerCase().startsWith('video')) {
+    const lowerLabel = ariaLabel.toLowerCase();
+
+    // Handle group selector "Select all photos from Tue, Feb 28, 2012"
+    if (ariaLabel.startsWith('Select all photos from')) {
+      result.type = 'group';
+      // Extract date from "Select all photos from Tue, Feb 28, 2012"
+      const groupDateMatch = ariaLabel.match(/Select all photos from \w+,?\s+(\w+\s+\d{1,2},?\s+\d{4})/);
+      if (groupDateMatch) {
+        const parsed = Date.parse(groupDateMatch[1]);
+        if (!isNaN(parsed)) {
+          result.date = new Date(parsed);
+        }
+      }
+      return result;
+    }
+
+    // Extract type
+    if (lowerLabel.startsWith('video')) {
       result.type = 'video';
-    } else if (ariaLabel.toLowerCase().startsWith('photo')) {
+    } else if (lowerLabel.startsWith('animation')) {
+      result.type = 'animation';
+    } else if (lowerLabel.startsWith('collage')) {
+      result.type = 'collage';
+    } else if (lowerLabel.startsWith('burst')) {
+      result.type = 'burst';
+    } else if (lowerLabel.startsWith('photo')) {
       result.type = 'photo';
     }
 
     // Extract orientation
-    const lowerLabel = ariaLabel.toLowerCase();
     if (lowerLabel.includes('portrait')) {
       result.orientation = 'portrait';
     } else if (lowerLabel.includes('landscape')) {
@@ -554,29 +580,39 @@
   }
 
   // Get checkbox from a photo container
-  // Only returns individual photo checkboxes, not date group selectors
+  // Returns individual photo/video/animation/collage/burst checkboxes
+  // Also returns group selectors (Select all photos from...) which can be used if date matches
   function getCheckbox(container) {
     const checkbox = container.querySelector(SELECTORS.photoCheckbox);
     if (!checkbox) return null;
 
-    // Filter out date group selectors by checking aria-label
-    // Individual photo checkboxes start with "Photo" or "Video"
-    // Date group selectors have "Select" or "Select all photos from..."
     const ariaLabel = checkbox.getAttribute('aria-label');
     if (!ariaLabel) return null;
 
     const lowerLabel = ariaLabel.toLowerCase();
 
-    // Must start with "photo" or "video" to be an individual photo checkbox
-    if (lowerLabel.startsWith('photo') || lowerLabel.startsWith('video')) {
+    // Accept individual media items (photo, video, animation, collage, burst)
+    if (lowerLabel.startsWith('photo') ||
+        lowerLabel.startsWith('video') ||
+        lowerLabel.startsWith('animation') ||
+        lowerLabel.startsWith('collage') ||
+        lowerLabel.startsWith('burst')) {
       return checkbox;
     }
 
-    // Log unexpected aria-label patterns for debugging
-    if (ariaLabel !== 'Select' && !ariaLabel.startsWith('Select all')) {
-      console.log('Google Photos Cleaner: Unexpected checkbox aria-label:', ariaLabel);
+    // Accept group selectors "Select all photos from [date]" - they contain a date we can parse
+    if (ariaLabel.startsWith('Select all photos from')) {
+      return checkbox;
     }
 
+    // Reject bare "Select" labels - no date info available
+    // These are typically group headers without useful metadata
+    if (ariaLabel === 'Select') {
+      return null;
+    }
+
+    // Log unexpected patterns for debugging
+    console.log('Google Photos Cleaner: Unexpected checkbox aria-label:', ariaLabel);
     return null;
   }
 
@@ -681,15 +717,23 @@
     const metadata = getPhotoMetadata(container);
 
     if (!metadata) {
+      // Log HTML for debugging when metadata can't be retrieved
       console.log('Google Photos Cleaner: Could not get metadata for container, skipping');
+      console.log('Google Photos Cleaner: Container HTML:', container.outerHTML.substring(0, 500));
       return false;
     }
 
     // Check file type
-    const isPhoto = metadata.type === 'photo';
+    // Photos, animations, collages, bursts all count as "photos" for filtering
+    // Group selectors ("Select all photos from...") match based on date only
+    const isPhotoType = metadata.type === 'photo' ||
+                        metadata.type === 'animation' ||
+                        metadata.type === 'collage' ||
+                        metadata.type === 'burst' ||
+                        metadata.type === 'group';
     const isVid = metadata.type === 'video';
 
-    if (isPhoto && !filters.fileType.photos) return false;
+    if (isPhotoType && !filters.fileType.photos) return false;
     if (isVid && !filters.fileType.videos) return false;
     // Note: RAW detection not available from aria-label, assume photos include RAW for now
 
@@ -722,8 +766,8 @@
       }
     }
 
-    // Check orientation (photos only)
-    if (filters.orientation !== 'any' && isPhoto) {
+    // Check orientation (photos only, skip for group selectors which have no orientation)
+    if (filters.orientation !== 'any' && isPhotoType && metadata.type !== 'group') {
       const orientation = metadata.orientation;
       if (orientation !== 'unknown' && orientation !== filters.orientation) {
         return false;
