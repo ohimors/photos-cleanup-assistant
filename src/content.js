@@ -475,7 +475,11 @@
     // Photo checkbox with aria-label containing all metadata
     photoCheckbox: '[role="checkbox"].ckGgle',
     // Photo image element
-    photoImage: '[data-latest-bg]'
+    photoImage: '[data-latest-bg]',
+    // Date scrubber (timeline on right side)
+    dateScrubber: 'div.scwMhd, [jsname="K0co3b"]',
+    // Year labels in date scrubber
+    yearLabel: '.HrGXnb'
   };
 
   // Parse the checkbox aria-label to extract metadata
