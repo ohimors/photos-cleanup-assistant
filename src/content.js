@@ -1259,9 +1259,22 @@
     updateProgressLabel('Scanning...');
     updateProgressStatus('');
 
-    // Scroll to top first
-    scrollToTop();
-    await wait(500);
+    // Jump to target year if "to date" is set, otherwise start from top
+    let jumped = false;
+    if (filters.dateRange.to) {
+      const targetYear = parseISODateString(filters.dateRange.to).getFullYear();
+      updateProgressStatus(`Jumping to ${targetYear}...`);
+      jumped = await jumpToYear(targetYear);
+    }
+
+    if (!jumped) {
+      // Fall back to starting from top
+      scrollToTop();
+      await wait(500);
+    }
+
+    // Wait for photos to be ready
+    await waitForMetadataLoaded();
 
     // Run selection loop
     await runSelectionLoop();
