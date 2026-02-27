@@ -100,3 +100,166 @@ After investing effort in the timeline scrubber approach (discovering jsaction, 
 ```
 8540087 feat: add binary search for fast date range navigation
 ```
+
+---
+
+## Follow-on: Why Agents Can't Recognize Unviable Solutions
+
+*User analysis on the structural reasons behind the behavior observed in this session.*
+
+### The Surface-Level Explanation (Engineering Reality)
+
+Coding agents today:
+
+* Optimize for local next-token likelihood
+* Follow prompts literally
+* Have shallow internal planning horizons
+* Lack strong internal falsification loops
+* Don't experience "friction" the way humans do
+
+They don't have an internal "this is going nowhere" signal unless you explicitly build one.
+
+So when a solution is unviable, they:
+
+* Keep elaborating
+* Refactor incorrectly
+* Patch around symptoms
+* Or hallucinate progress
+
+This is not Gödel. It's gradient descent + insufficient search strategy.
+
+---
+
+### Why Humans Notice Failure Faster
+
+Humans detect "unviable" via:
+
+1. Pattern recognition from past dead-ends
+2. Emotional discomfort ("this smells wrong")
+3. Implicit cost modeling
+4. Meta-reasoning ("this constraint conflicts with earlier ones")
+
+Current agents don't naturally simulate those layers.
+
+They generate. They don't feel stuck.
+
+---
+
+### Is It By Design?
+
+Sort of.
+
+LLMs are optimized to:
+
+* Produce plausible continuations
+* Stay helpful
+* Avoid saying "I don't know" unnecessarily
+* Follow instructions
+
+They are *not* optimized to:
+
+* Abort early
+* Declare unsatisfiable states
+* Search alternative architectures deeply
+* Evaluate global viability before proceeding
+
+So yes — their training objective biases them toward continuation.
+
+---
+
+### Is It a Deep Theoretical Flaw?
+
+No in the Gödel sense. Yes in the optimization sense.
+
+Here's the deeper issue:
+
+Agents lack strong internal:
+
+* Global constraint modeling
+* Search-space exploration
+* Self-evaluation beyond surface coherence
+* Explicit cost-of-continuation modeling
+
+They're performing: **Local optimization in a massive space** — not global search with pruning.
+
+Humans are doing: **Heuristic global pruning constantly.**
+
+---
+
+### This Is a Search & Evaluation Problem
+
+In agent terms, you need:
+
+* Explicit plan tree generation
+* Branch scoring
+* Failure detection heuristics
+* Rollbacks
+* External verification loops
+
+When agents feel "stuck," it's usually because: **They don't know they're stuck.**
+
+They lack an internal contradiction detector with teeth.
+
+---
+
+### Is This Fixable?
+
+Yes — and people are working on it.
+
+The direction is:
+
+* Tool-augmented agents
+* Tree-of-thought search
+* Monte Carlo style branching
+* External validators
+* Test-driven generation loops
+* Deliberate "critic" models
+* Self-reflection prompts
+
+When you give agents: "Evaluate whether this approach is viable before continuing" — they perform dramatically better.
+
+---
+
+### Is This a Fundamental Limit?
+
+Not in the Gödel sense.
+
+But there *is* a deeper limitation:
+
+LLMs do not have a grounded model of objective reality.
+
+They model: **Textual plausibility.**
+
+Humans model: **Constraints + embodied consequences.**
+
+Until agents are tightly integrated with:
+
+* Test harnesses
+* Execution engines
+* Formal validators
+* Real cost feedback
+
+They will default to narrative coherence over structural viability.
+
+---
+
+### The Real Core Insight
+
+They don't "decide" a solution is unviable. They lack a strong penalty signal for continuing down a bad branch.
+
+**Humans feel cognitive dissonance. Agents don't.**
+
+---
+
+### Architectural Implications
+
+The fix isn't a better LLM. It's:
+
+1. AI proposes
+2. Execution validates
+3. External critic prunes
+4. Search explores alternatives
+
+Agents need explicit failure signals and rollback mechanisms.
+
+Without that, they'll happily polish a doomed idea forever.
