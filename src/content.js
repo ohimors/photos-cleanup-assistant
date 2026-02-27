@@ -1090,6 +1090,29 @@
     return checkbox.getAttribute('aria-checked') === 'true';
   }
 
+  // Ensure the checkbox element exists by triggering mouseenter
+  // Google Photos only renders checkboxes on hover
+  async function ensureCheckboxExists(container) {
+    // First check if checkbox already exists
+    let checkbox = getCheckbox(container);
+    if (checkbox) return checkbox;
+
+    // Trigger mouseenter to make Google Photos render the checkbox
+    container.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    container.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+
+    // Wait for checkbox to appear
+    await wait(50);
+
+    // Try to get checkbox again
+    checkbox = getCheckbox(container);
+    if (checkbox) return checkbox;
+
+    // Still no checkbox, wait a bit more and try again
+    await wait(100);
+    return getCheckbox(container);
+  }
+
   // Select a photo by clicking its checkbox with retry logic
   async function selectPhoto(container, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -2004,9 +2027,9 @@
           for (const container of photos) {
             if (selection.shouldStop) break;
 
-            // Generate unique key - MUST be content-based, not position-based
-            // Google Photos virtualizes the list and recycles DOM elements at same positions
-            const checkbox = getCheckbox(container);
+            // First, ensure checkbox exists by triggering mouseenter
+            // Google Photos only renders checkboxes on hover
+            const checkbox = await ensureCheckboxExists(container);
             const photoEl = container.querySelector('[data-latest-bg]');
             const ariaLabel = checkbox?.getAttribute('aria-label');
             const bgUrl = photoEl?.getAttribute('data-latest-bg');
@@ -2071,9 +2094,9 @@
                 console.log(`Google Photos Cleaner: Selected photo #${selection.count}`);
               } else {
                 // Selection failed - log details for debugging
-                const metadata = getPhotoMetadata(container);
+                const failedMetadata = getPhotoMetadata(container);
                 console.warn('Google Photos Cleaner: FAILED to select photo that should be selected!',
-                  'Date:', metadata?.date?.toDateString(),
+                  'Date:', failedMetadata?.date?.toDateString(),
                   'Key:', key.substring(0, 50) + '...');
               }
             } catch (e) {
