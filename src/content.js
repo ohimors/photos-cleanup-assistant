@@ -489,12 +489,13 @@
   //   "Animation - Photo - Portrait - Oct 7, 2012, 3:00:37 PM"
   //   "Collage - Photo - Landscape - Oct 7, 2012, 11:00:03 AM"
   //   "Burst photo - Portrait - Mar 31, 2019, 12:47:24 PM - 2 photos in sequence"
+  //   "Stylized photo - Photo - Landscape - May 26, 2013, 3:40:41 PM"
   //   "Select all photos from Tue, Feb 28, 2012"
   function parseCheckboxLabel(ariaLabel) {
     if (!ariaLabel) return null;
 
     const result = {
-      type: 'photo',      // 'photo' | 'video' | 'animation' | 'collage' | 'burst' | 'group'
+      type: 'photo',      // 'photo' | 'video' | 'animation' | 'collage' | 'burst' | 'stylized' | 'group'
       orientation: 'unknown', // 'portrait' | 'landscape' | 'square' | 'unknown'
       date: null          // Date object
     };
@@ -524,6 +525,8 @@
       result.type = 'collage';
     } else if (lowerLabel.startsWith('burst')) {
       result.type = 'burst';
+    } else if (lowerLabel.startsWith('stylized')) {
+      result.type = 'stylized';
     } else if (lowerLabel.startsWith('photo')) {
       result.type = 'photo';
     }
@@ -591,12 +594,13 @@
 
     const lowerLabel = ariaLabel.toLowerCase();
 
-    // Accept individual media items (photo, video, animation, collage, burst)
+    // Accept individual media items (photo, video, animation, collage, burst, stylized)
     if (lowerLabel.startsWith('photo') ||
         lowerLabel.startsWith('video') ||
         lowerLabel.startsWith('animation') ||
         lowerLabel.startsWith('collage') ||
-        lowerLabel.startsWith('burst')) {
+        lowerLabel.startsWith('burst') ||
+        lowerLabel.startsWith('stylized')) {
       return checkbox;
     }
 
@@ -724,12 +728,13 @@
     }
 
     // Check file type
-    // Photos, animations, collages, bursts all count as "photos" for filtering
+    // Photos, animations, collages, bursts, stylized all count as "photos" for filtering
     // Group selectors ("Select all photos from...") match based on date only
     const isPhotoType = metadata.type === 'photo' ||
                         metadata.type === 'animation' ||
                         metadata.type === 'collage' ||
                         metadata.type === 'burst' ||
+                        metadata.type === 'stylized' ||
                         metadata.type === 'group';
     const isVid = metadata.type === 'video';
 
@@ -1849,6 +1854,10 @@
 
   // Run the selection process with UI updates
   async function runSelectionWithUI() {
+    // Always start from top to ensure consistent state on repeat runs
+    scrollToTop();
+    await wait(300);
+
     // Switch to progress view
     selection.isRunning = true;
     selection.count = 0;

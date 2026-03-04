@@ -137,3 +137,6 @@ Google Photos does not provide a public API to delete media items from a user’
 - `PRIVACY.md`
 - `SECURITY.md`
 - `README.md` with explicit non-deletion stance and safe-use instructions
+
+## Development rules
+- **Version bumps required**: When making code changes (bug fixes, features, refactors), always bump the patch version in `manifest.json` before committing. The version follows semver: `major.minor.patch` (e.g., `0.1.26` → `0.1.27` for bug fixes).
